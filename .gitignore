@@ -1,0 +1,26 @@
+# dependencies
+/node_modules
+
+# next.js
+/.next/
+/out/
+
+# production
+/build
+
+# generated (copied from node_modules at build time)
+/public/sql-wasm.wasm
+
+# misc
+.DS_Store
+*.pem
+_enginetest.mjs
+*.tsbuildinfo
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# env
+.env*.local
