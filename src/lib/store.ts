@@ -314,10 +314,22 @@ export const usePlayground = create<PlaygroundState>((set, get) => ({
   },
 
   newTab: ({ sql = "", title, run } = {}) => {
-    const seq = get().tabSeq + 1;
+    const { tabs } = get();
+    // Reuse the lowest free "Query N" number (so closing Query 2 frees it).
+    let finalTitle = title;
+    if (!finalTitle) {
+      const used = new Set<number>();
+      for (const t of tabs) {
+        const m = /^Query (\d+)$/.exec(t.title);
+        if (m) used.add(Number(m[1]));
+      }
+      let n = 1;
+      while (used.has(n)) n++;
+      finalTitle = `Query ${n}`;
+    }
     const id = newTabId();
-    const tab: EditorTab = { id, title: title ?? `Query ${seq}`, sql };
-    set((s) => ({ tabs: [...s.tabs, tab], activeTabId: id, tabSeq: seq, editorSql: sql }));
+    const tab: EditorTab = { id, title: finalTitle, sql };
+    set((s) => ({ tabs: [...s.tabs, tab], activeTabId: id, editorSql: sql }));
     persist(get());
     if (run && sql.trim()) void get().run(sql);
   },
