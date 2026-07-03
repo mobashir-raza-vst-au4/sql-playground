@@ -102,7 +102,7 @@ export default function ResultsPanel() {
         className="flex items-center justify-between px-1 h-9 border-b border-t shrink-0"
         style={{ borderColor: "var(--border)" }}
       >
-        <div className="flex items-center h-full">
+        <div className="flex items-center h-full" data-tour="visualize">
           <TabButton id="results" icon={<Table className="w-3.5 h-3.5" />} label="Results" />
           <TabButton id="visualize" icon={<Workflow className="w-3.5 h-3.5" />} label="Visualize" />
         </div>

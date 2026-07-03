@@ -9,7 +9,10 @@ import SchemaSidebar from "./SchemaSidebar";
 import TableBuilder from "./TableBuilder";
 import JoinGuide from "./JoinGuide";
 import AiPanel from "./AiPanel";
+import Tour from "./Tour";
 import { Database } from "lucide-react";
+
+const TOUR_KEY = "sqlpg:tour-done";
 
 export default function Playground() {
   const init = usePlayground((s) => s.init);
@@ -20,10 +23,26 @@ export default function Playground() {
   const [editTable, setEditTable] = useState<string | null>(null);
   const [guideOpen, setGuideOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false); // mobile drawer
+  const [tourOpen, setTourOpen] = useState(false);
 
   useEffect(() => {
     void init();
   }, [init]);
+
+  // First-run guided tour once the app is ready.
+  useEffect(() => {
+    if (!ready) return;
+    if (typeof window !== "undefined" && localStorage.getItem(TOUR_KEY) !== "1") {
+      const t = setTimeout(() => setTourOpen(true), 900);
+      return () => clearTimeout(t);
+    }
+  }, [ready]);
+
+  const closeTour = () => {
+    setTourOpen(false);
+    setSidebarOpen(false);
+    if (typeof window !== "undefined") localStorage.setItem(TOUR_KEY, "1");
+  };
 
   const openBuilder = (table?: string) => {
     setEditTable(table ?? null);
@@ -36,6 +55,7 @@ export default function Playground() {
         onNewTable={() => openBuilder()}
         onOpenGuide={() => setGuideOpen(true)}
         onToggleSidebar={() => setSidebarOpen((v) => !v)}
+        onStartTour={() => setTourOpen(true)}
       />
 
       <div className="flex-1 flex min-h-0 relative">
@@ -94,6 +114,7 @@ export default function Playground() {
         <TableBuilder editTable={editTable} onClose={() => setBuilderOpen(false)} />
       )}
       {guideOpen && <JoinGuide onClose={() => setGuideOpen(false)} />}
+      {ready && tourOpen && <Tour onClose={closeTour} onSidebar={setSidebarOpen} />}
     </div>
   );
 }

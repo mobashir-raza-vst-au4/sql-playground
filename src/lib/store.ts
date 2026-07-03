@@ -58,9 +58,12 @@ interface PersistedWorkspace {
   tabs?: EditorTab[];
   activeTabId?: string;
   tabSeq?: number;
+  tableOrder?: Record<string, number>;
+  tableSort?: TableSort;
 }
 
 export type Theme = "dark" | "light";
+export type TableSort = "name-asc" | "name-desc" | "created-desc" | "created-asc";
 
 interface PlaygroundState {
   dialect: Dialect;
@@ -82,6 +85,9 @@ interface PlaygroundState {
   /** The exact SQL of the last run (used by the visualizer). */
   lastRunSql: string;
   schema: TableMeta[];
+  /** Creation sequence per table (assigned when first seen) → sort by newest/oldest. */
+  tableOrder: Record<string, number>;
+  tableSort: TableSort;
   theme: Theme;
   aiEnabled: boolean;
   aiProvider: AiProvider;
@@ -102,6 +108,7 @@ interface PlaygroundState {
   /** Run SQL and also fold it into setupSql so it persists across resets. */
   applySetup: (sql: string) => Promise<QueryOutcome>;
   refreshSchema: () => Promise<void>;
+  setTableSort: (s: TableSort) => void;
   resetDatabase: () => Promise<void>;
   loadSample: (id: string) => Promise<void>;
   toggleTheme: () => void;
@@ -134,6 +141,8 @@ function persist(state: PlaygroundState) {
     tabs: state.tabs,
     activeTabId: state.activeTabId,
     tabSeq: state.tabSeq,
+    tableOrder: state.tableOrder,
+    tableSort: state.tableSort,
   };
   try {
     localStorage.setItem(LS_KEY, JSON.stringify(data));
@@ -166,6 +175,8 @@ export const usePlayground = create<PlaygroundState>((set, get) => ({
   outcome: null,
   lastRunSql: "",
   schema: [],
+  tableOrder: {},
+  tableSort: "name-asc",
   theme: "dark",
   aiEnabled: false,
   aiProvider: "anthropic",
@@ -183,7 +194,11 @@ export const usePlayground = create<PlaygroundState>((set, get) => ({
       const persisted = loadPersisted();
       const dialect = persisted?.dialect ?? "postgres";
       const theme = loadTheme();
-      set({ theme });
+      set({
+        theme,
+        tableOrder: persisted?.tableOrder ?? {},
+        tableSort: persisted?.tableSort ?? "name-asc",
+      });
       applyThemeToDom(theme);
 
       // Restore AI settings (stored separately from the workspace, per provider).
@@ -408,10 +423,34 @@ export const usePlayground = create<PlaygroundState>((set, get) => ({
     if (!engine) return;
     try {
       const schema = await engine.introspect();
-      set({ schema });
+      // Track creation order: assign a sequence to newly-seen tables, prune dropped ones.
+      const prev = get().tableOrder;
+      const order = { ...prev };
+      const names = new Set(schema.map((t) => t.name));
+      let changed = false;
+      let next = Object.values(order).length ? Math.max(...Object.values(order)) + 1 : 1;
+      for (const t of schema) {
+        if (!(t.name in order)) {
+          order[t.name] = next++;
+          changed = true;
+        }
+      }
+      for (const k of Object.keys(order)) {
+        if (!names.has(k)) {
+          delete order[k];
+          changed = true;
+        }
+      }
+      set(changed ? { schema, tableOrder: order } : { schema });
+      if (changed) persist(get());
     } catch {
       /* introspection best-effort */
     }
+  },
+
+  setTableSort: (s) => {
+    set({ tableSort: s });
+    persist(get());
   },
 
   resetDatabase: async () => {

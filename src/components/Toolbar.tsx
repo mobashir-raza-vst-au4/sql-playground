@@ -14,6 +14,7 @@ import {
   BookOpen,
   Code2,
   Menu,
+  HelpCircle,
 } from "lucide-react";
 import { useState } from "react";
 import Logo from "./Logo";
@@ -22,10 +23,12 @@ export default function Toolbar({
   onNewTable,
   onOpenGuide,
   onToggleSidebar,
+  onStartTour,
 }: {
   onNewTable: () => void;
   onOpenGuide: () => void;
   onToggleSidebar: () => void;
+  onStartTour: () => void;
 }) {
   const {
     dialect,
@@ -97,7 +100,7 @@ export default function Toolbar({
       <div className="flex-1" />
 
       {/* Example queries (dialect-aware) */}
-      <div className="relative">
+      <div className="relative" data-tour="examples">
         <button className="btn" onClick={() => setExamplesOpen((v) => !v)} disabled={!ready}>
           <Code2 className="w-4 h-4" /> Examples <ChevronDown className="w-3.5 h-3.5" />
         </button>
@@ -159,7 +162,7 @@ export default function Toolbar({
         <BookOpen className="w-4 h-4" /> JOIN Guide
       </button>
 
-      <button className="btn" onClick={onNewTable} disabled={!ready}>
+      <button className="btn" onClick={onNewTable} disabled={!ready} data-tour="newtable">
         <Plus className="w-4 h-4" /> New Table
       </button>
 
@@ -177,10 +180,15 @@ export default function Toolbar({
       <button
         className={`btn ${aiEnabled ? "" : "opacity-70"}`}
         onClick={() => setAiEnabled(!aiEnabled)}
-        title="Toggle the AI assistant (coming soon)"
+        title="Toggle the AI tutor"
+        data-tour="ai"
       >
         <Sparkles className={`w-4 h-4 ${aiEnabled ? "text-accent" : ""}`} />
         AI {aiEnabled ? "On" : "Off"}
+      </button>
+
+      <button className="btn" onClick={onStartTour} title="Take the guided tour">
+        <HelpCircle className="w-4 h-4" />
       </button>
 
       <button className="btn" onClick={toggleTheme} title="Toggle dark / light">
@@ -192,6 +200,7 @@ export default function Toolbar({
         onClick={() => void run()}
         disabled={!ready || running}
         title="Run the entire script (all statements)"
+        data-tour="run"
       >
         <Play className="w-4 h-4" /> {running ? "Running…" : "Run all"}
       </button>

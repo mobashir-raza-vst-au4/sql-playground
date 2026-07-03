@@ -213,7 +213,7 @@ export default function SqlEditor() {
   };
 
   return (
-    <div className="h-full flex flex-col">
+    <div className="h-full flex flex-col" data-tour="editor">
       <div
         className="flex items-center h-9 border-b bg-panel shrink-0"
         style={{ borderColor: "var(--border)" }}

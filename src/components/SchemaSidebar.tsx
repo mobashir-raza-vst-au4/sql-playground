@@ -1,8 +1,8 @@
 "use client";
 
 import { usePlayground } from "@/lib/store";
-import { Table2, Key, Plus, Pencil, ChevronRight, RefreshCw, Eraser, Trash2, X } from "lucide-react";
-import { useState } from "react";
+import { Table2, Key, Plus, Pencil, ChevronRight, RefreshCw, Eraser, Trash2, X, ArrowUpDown } from "lucide-react";
+import { useMemo, useState } from "react";
 
 export default function SchemaSidebar({
   onNewTable,
@@ -16,7 +16,27 @@ export default function SchemaSidebar({
   const refreshSchema = usePlayground((s) => s.refreshSchema);
   const newTab = usePlayground((s) => s.newTab);
   const applySetup = usePlayground((s) => s.applySetup);
+  const tableOrder = usePlayground((s) => s.tableOrder);
+  const tableSort = usePlayground((s) => s.tableSort);
+  const setTableSort = usePlayground((s) => s.setTableSort);
   const [open, setOpen] = useState<Record<string, boolean>>({});
+
+  // Apply the chosen sort to the table list.
+  const sortedSchema = useMemo(() => {
+    const list = [...schema];
+    const seq = (name: string) => tableOrder[name] ?? 0;
+    switch (tableSort) {
+      case "name-desc":
+        return list.sort((a, b) => b.name.localeCompare(a.name));
+      case "created-desc":
+        return list.sort((a, b) => seq(b.name) - seq(a.name)); // newest first
+      case "created-asc":
+        return list.sort((a, b) => seq(a.name) - seq(b.name)); // oldest first
+      case "name-asc":
+      default:
+        return list.sort((a, b) => a.name.localeCompare(b.name));
+    }
+  }, [schema, tableSort, tableOrder]);
   // In-app confirmation (window.confirm is unreliable in embedded/iframe views).
   const [pending, setPending] = useState<{ type: "clear" | "drop"; table: string } | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -56,13 +76,31 @@ export default function SchemaSidebar({
     <aside
       className="w-64 shrink-0 border-r bg-panel flex flex-col min-h-0 h-full"
       style={{ borderColor: "var(--border)" }}
+      data-tour="schema"
     >
       <div
-        className="flex items-center justify-between px-3 h-9 border-b text-xs text-muted font-medium shrink-0"
+        className="flex items-center gap-2 px-3 h-9 border-b text-xs text-muted font-medium shrink-0"
         style={{ borderColor: "var(--border)" }}
       >
-        <span>SCHEMA · {schema.length} table{schema.length === 1 ? "" : "s"}</span>
-        <button className="hover:text-app" onClick={() => void refreshSchema()} title="Refresh schema">
+        <span className="truncate">SCHEMA · {schema.length} table{schema.length === 1 ? "" : "s"}</span>
+        <div className="flex-1" />
+        {schema.length > 1 && (
+          <label className="flex items-center gap-1" title="Sort tables">
+            <ArrowUpDown className="w-3.5 h-3.5" />
+            <select
+              className="bg-transparent text-xs cursor-pointer outline-none"
+              style={{ color: "var(--muted)" }}
+              value={tableSort}
+              onChange={(e) => setTableSort(e.target.value as typeof tableSort)}
+            >
+              <option value="name-asc">Name A–Z</option>
+              <option value="name-desc">Name Z–A</option>
+              <option value="created-desc">Newest first</option>
+              <option value="created-asc">Oldest first</option>
+            </select>
+          </label>
+        )}
+        <button className="hover:text-app shrink-0" onClick={() => void refreshSchema()} title="Refresh schema">
           <RefreshCw className="w-3.5 h-3.5" />
         </button>
       </div>
@@ -75,7 +113,7 @@ export default function SchemaSidebar({
           </div>
         )}
 
-        {schema.map((t) => (
+        {sortedSchema.map((t) => (
           <div key={t.name} className="mb-1">
             <div className="flex items-center gap-1 group rounded hover:bg-hover">
               <button
