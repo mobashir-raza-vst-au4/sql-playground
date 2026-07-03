@@ -234,8 +234,13 @@ export default function SqlEditor() {
                 onDragOver={(e) => e.preventDefault()}
                 onDrop={(e) => {
                   e.preventDefault();
-                  if (dragId.current) reorderTab(dragId.current, t.id);
+                  const fromId = dragId.current;
                   dragId.current = null;
+                  if (!fromId) return;
+                  // Drop on the right half of the target → place after it; left half → before.
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  const after = e.clientX > rect.left + rect.width / 2;
+                  reorderTab(fromId, t.id, after);
                 }}
                 onDragEnd={() => (dragId.current = null)}
                 className="group flex items-center gap-1.5 px-3 border-r cursor-pointer text-xs whitespace-nowrap select-none"

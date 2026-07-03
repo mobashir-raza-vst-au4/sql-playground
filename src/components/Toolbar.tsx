@@ -13,6 +13,7 @@ import {
   ChevronDown,
   BookOpen,
   Code2,
+  Menu,
 } from "lucide-react";
 import { useState } from "react";
 import Logo from "./Logo";
@@ -20,9 +21,11 @@ import Logo from "./Logo";
 export default function Toolbar({
   onNewTable,
   onOpenGuide,
+  onToggleSidebar,
 }: {
   onNewTable: () => void;
   onOpenGuide: () => void;
+  onToggleSidebar: () => void;
 }) {
   const {
     dialect,
@@ -45,22 +48,32 @@ export default function Toolbar({
 
   return (
     <header
-      className="flex items-center gap-3 px-4 h-14 border-b bg-panel shrink-0"
+      className="flex flex-wrap items-center gap-2 px-3 py-2 min-h-14 border-b bg-panel shrink-0 [&>*]:shrink-0"
       style={{ borderColor: "var(--border)" }}
     >
+      {/* Sidebar toggle (mobile only) */}
+      <button
+        className="md:hidden text-muted hover:text-app p-1"
+        onClick={onToggleSidebar}
+        title="Toggle schema sidebar"
+        aria-label="Toggle schema sidebar"
+      >
+        <Menu className="w-5 h-5" />
+      </button>
+
       <div className="flex items-center gap-2">
         <Logo size={28} />
         <div className="leading-tight">
           <div className="font-semibold text-sm">SQL Playground</div>
-          <div className="text-[10px] text-muted hidden md:block">learn, run &amp; visualize SQL</div>
+          <div className="text-[10px] text-muted hidden lg:block">learn, run &amp; visualize SQL</div>
         </div>
       </div>
 
-      <div className="w-px h-6 mx-1" style={{ background: "var(--border)" }} />
+      <div className="w-px h-6 mx-1 hidden sm:block" style={{ background: "var(--border)" }} />
 
       {/* Dialect */}
       <label className="flex items-center gap-2 text-sm text-muted">
-        Engine
+        <span className="hidden sm:inline">Engine</span>
         <select
           className="select"
           value={dialect}

@@ -7,8 +7,21 @@ export default function Page() {
   return (
     <>
       {/* Crawlable content — the interactive app is client-rendered, so this
-          gives search engines real text to index. Visually hidden. */}
-      <section className="sr-only">
+          gives search engines real text to index. Visually hidden via inline
+          styles so it never flashes before the stylesheet loads. */}
+      <section
+        style={{
+          position: "absolute",
+          width: 1,
+          height: 1,
+          padding: 0,
+          margin: -1,
+          overflow: "hidden",
+          clip: "rect(0, 0, 0, 0)",
+          whiteSpace: "nowrap",
+          border: 0,
+        }}
+      >
         <h1>SQL Playground — Learn, Run &amp; Visualize SQL Online</h1>
         <p>
           A free, interactive SQL playground that runs entirely in your browser — no signup, no

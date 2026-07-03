@@ -19,6 +19,7 @@ export default function Playground() {
   const [builderOpen, setBuilderOpen] = useState(false);
   const [editTable, setEditTable] = useState<string | null>(null);
   const [guideOpen, setGuideOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false); // mobile drawer
 
   useEffect(() => {
     void init();
@@ -31,10 +32,37 @@ export default function Playground() {
 
   return (
     <div className="h-screen flex flex-col bg-bg text-app overflow-hidden">
-      <Toolbar onNewTable={() => openBuilder()} onOpenGuide={() => setGuideOpen(true)} />
+      <Toolbar
+        onNewTable={() => openBuilder()}
+        onOpenGuide={() => setGuideOpen(true)}
+        onToggleSidebar={() => setSidebarOpen((v) => !v)}
+      />
 
-      <div className="flex-1 flex min-h-0">
-        <SchemaSidebar onNewTable={() => openBuilder()} onEditTable={(t) => openBuilder(t)} />
+      <div className="flex-1 flex min-h-0 relative">
+        {/* Schema sidebar — static on md+, slide-in drawer on mobile */}
+        <div
+          className={`absolute md:static inset-y-0 left-0 z-40 md:z-auto h-full transition-transform md:translate-x-0 ${
+            sidebarOpen ? "translate-x-0" : "-translate-x-full"
+          }`}
+        >
+          <SchemaSidebar
+            onNewTable={() => {
+              openBuilder();
+              setSidebarOpen(false);
+            }}
+            onEditTable={(t) => {
+              openBuilder(t);
+              setSidebarOpen(false);
+            }}
+          />
+        </div>
+        {/* backdrop when the mobile drawer is open */}
+        {sidebarOpen && (
+          <div
+            className="md:hidden absolute inset-0 z-30 bg-black/50"
+            onClick={() => setSidebarOpen(false)}
+          />
+        )}
 
         <main className="flex-1 flex flex-col min-w-0">
           {!ready ? (
@@ -54,7 +82,12 @@ export default function Playground() {
           )}
         </main>
 
-        {ready && aiEnabled && <AiPanel />}
+        {/* AI panel — side panel on md+, full-screen overlay on mobile */}
+        {ready && aiEnabled && (
+          <div className="absolute md:static inset-0 md:inset-auto z-40 md:z-auto h-full">
+            <AiPanel />
+          </div>
+        )}
       </div>
 
       {builderOpen && (
