@@ -3,6 +3,8 @@
 import { create } from "zustand";
 import {
   createEngine,
+  returnsRows,
+  splitStatements,
   type Dialect,
   type DbEngine,
   type QueryOutcome,
@@ -10,14 +12,52 @@ import {
 } from "./engine";
 import { getSample, sampleSql, SAMPLES } from "./samples";
 import { defaultModel, type AiProvider } from "./ai";
+import { idbGet, idbSet, idbDel } from "./idb";
+import { DIALECTS } from "./engine";
+
+/** Persist the full database (schema + data) so a refresh keeps everything. */
+async function saveSnapshot(dialect: Dialect, engine: DbEngine): Promise<void> {
+  try {
+    const snap = await engine.snapshot();
+    if (snap) await idbSet(`db:${dialect}`, snap);
+  } catch {
+    /* best-effort */
+  }
+}
+
+/** True if running this SQL could change the database (INSERT/UPDATE/DELETE/DDL…). */
+function isMutating(sql: string): boolean {
+  return splitStatements(sql).some((s) => !returnsRows(s));
+}
 
 const LS_KEY = "sqlpg:workspace:v1";
+
+/** One editor tab (VS Code style) — its own SQL and title. */
+export interface EditorTab {
+  id: string;
+  title: string;
+  sql: string;
+}
+
+let tabCounter = 0;
+function newTabId(): string {
+  tabCounter += 1;
+  try {
+    if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
+  } catch {
+    /* fall through */
+  }
+  return `tab-${tabCounter}-${typeof performance !== "undefined" ? Math.floor(performance.now()) : tabCounter}`;
+}
 
 interface PersistedWorkspace {
   dialect: Dialect;
   editorSql: string;
   setupSql: string; // schema + seed applied to a fresh DB
   activeSampleId: string | null; // set when the workspace is an unmodified built-in sample
+  tabs?: EditorTab[];
+  activeTabId?: string;
+  tabSeq?: number;
 }
 
 export type Theme = "dark" | "light";
@@ -27,7 +67,12 @@ interface PlaygroundState {
   engine: DbEngine | null;
   ready: boolean;
   running: boolean;
+  /** SQL of the ACTIVE editor tab (mirror of tabs[activeTabId]). */
   editorSql: string;
+  /** Open editor tabs and which one is active. */
+  tabs: EditorTab[];
+  activeTabId: string;
+  tabSeq: number;
   /** Cumulative DDL/DML that defines the current database (from the table builder + Run-as-setup). */
   setupSql: string;
   /** When the workspace is an unmodified built-in sample, its id — lets us re-seed
@@ -49,6 +94,9 @@ interface PlaygroundState {
   init: () => Promise<void>;
   setDialect: (d: Dialect) => Promise<void>;
   setEditorSql: (sql: string) => void;
+  newTab: (opts?: { sql?: string; title?: string; run?: boolean }) => void;
+  closeTab: (id: string) => void;
+  setActiveTab: (id: string) => void;
   run: (sql?: string) => Promise<void>;
   /** Run SQL and also fold it into setupSql so it persists across resets. */
   applySetup: (sql: string) => Promise<QueryOutcome>;
@@ -82,6 +130,9 @@ function persist(state: PlaygroundState) {
     editorSql: state.editorSql,
     setupSql: state.setupSql,
     activeSampleId: state.activeSampleId,
+    tabs: state.tabs,
+    activeTabId: state.activeTabId,
+    tabSeq: state.tabSeq,
   };
   try {
     localStorage.setItem(LS_KEY, JSON.stringify(data));
@@ -106,6 +157,9 @@ export const usePlayground = create<PlaygroundState>((set, get) => ({
   ready: false,
   running: false,
   editorSql: "",
+  tabs: [],
+  activeTabId: "",
+  tabSeq: 1,
   setupSql: "",
   activeSampleId: null,
   outcome: null,
@@ -150,17 +204,28 @@ export const usePlayground = create<PlaygroundState>((set, get) => ({
       let editorSql = persisted?.editorSql ?? "";
       let activeSampleId = persisted?.activeSampleId ?? null;
 
-      if (setupSql.trim()) {
+      // Restore the full database (schema + data, including rows edited via the
+      // editor) from the last saved snapshot. This survives refreshes.
+      const snap = await idbGet(`db:${dialect}`);
+      let restored = false;
+      if (snap) {
+        try {
+          await engine.restore(snap);
+          restored = true;
+        } catch {
+          restored = false;
+        }
+      }
+      if (!restored && setupSql.trim()) {
         await engine.exec(setupSql);
       }
 
       set({ engine, dialect, ready: true, setupSql, editorSql, activeSampleId, statusMessage: null });
       await get().refreshSchema();
 
-      // If the database came up empty (first visit, a prior Reset, or a setup
-      // that failed to apply), seed the default sample so there's always
-      // something to explore. A user's own tables (non-empty schema) are kept.
-      if (get().schema.length === 0) {
+      // Seed the sample ONLY on a true first visit (no snapshot at all). If the
+      // user previously reset to an empty DB, the snapshot is empty and honored.
+      if (!snap && get().schema.length === 0) {
         const sample = SAMPLES[0];
         const seed = sampleSql(sample, dialect);
         const res = await engine.exec(seed);
@@ -173,7 +238,23 @@ export const usePlayground = create<PlaygroundState>((set, get) => ({
         }
       }
 
+      // Restore editor tabs, or create the first one from editorSql (migration).
+      let tabs = persisted?.tabs;
+      let activeTabId = persisted?.activeTabId ?? "";
+      let tabSeq = persisted?.tabSeq ?? 1;
+      if (!tabs || tabs.length === 0) {
+        const id = newTabId();
+        tabs = [{ id, title: "Query 1", sql: editorSql }];
+        activeTabId = id;
+        tabSeq = 1;
+      } else {
+        if (!tabs.some((t) => t.id === activeTabId)) activeTabId = tabs[0].id;
+        editorSql = tabs.find((t) => t.id === activeTabId)?.sql ?? "";
+      }
+      set({ tabs, activeTabId, tabSeq, editorSql });
+
       persist(get());
+      await saveSnapshot(dialect, engine);
     })();
 
     return initPromise;
@@ -185,32 +266,84 @@ export const usePlayground = create<PlaygroundState>((set, get) => ({
     const engine = createEngine(d);
     await engine.init();
 
-    const sample = get().activeSampleId ? getSample(get().activeSampleId!) : undefined;
     let note: string | null = null;
 
-    if (sample) {
-      // Built-in sample → re-seed the flavor written for the new dialect.
-      const seed = sampleSql(sample, d);
-      await engine.exec(seed);
-      set({ setupSql: seed });
-    } else if (get().setupSql.trim()) {
-      // Custom schema → try to re-apply. Dialect-specific SQL may not port.
-      const res = await engine.exec(get().setupSql);
-      if (!res.ok) {
-        note = `Your custom schema uses SQL that doesn't run on ${d.toUpperCase()}. Started an empty ${d} database — use Reset or rebuild your tables.`;
-        await engine.reset();
-        set({ setupSql: "" });
+    // Prefer this dialect's own saved snapshot (its persisted tables + data).
+    const snap = await idbGet(`db:${d}`);
+    let restored = false;
+    if (snap) {
+      try {
+        await engine.restore(snap);
+        restored = true;
+      } catch {
+        restored = false;
+      }
+    }
+
+    if (!restored) {
+      const sample = get().activeSampleId ? getSample(get().activeSampleId!) : undefined;
+      if (sample) {
+        // Built-in sample → re-seed the flavor written for the new dialect.
+        const seed = sampleSql(sample, d);
+        await engine.exec(seed);
+        set({ setupSql: seed });
+      } else if (get().setupSql.trim()) {
+        // Custom schema → try to re-apply. Dialect-specific SQL may not port.
+        const res = await engine.exec(get().setupSql);
+        if (!res.ok) {
+          note = `Your custom schema uses SQL that doesn't run on ${d.toUpperCase()}. Started an empty ${d} database — use Reset or rebuild your tables.`;
+          await engine.reset();
+          set({ setupSql: "" });
+        }
       }
     }
 
     set({ engine, ready: true, statusMessage: note });
     await get().refreshSchema();
     persist(get());
+    await saveSnapshot(d, engine);
     if (note) setTimeout(() => set({ statusMessage: null }), 6000);
   },
 
   setEditorSql: (sql) => {
-    set({ editorSql: sql });
+    // Write to the active tab and keep the editorSql mirror in sync.
+    const { tabs, activeTabId } = get();
+    const nextTabs = tabs.map((t) => (t.id === activeTabId ? { ...t, sql } : t));
+    set({ editorSql: sql, tabs: nextTabs });
+    persist(get());
+  },
+
+  newTab: ({ sql = "", title, run } = {}) => {
+    const seq = get().tabSeq + 1;
+    const id = newTabId();
+    const tab: EditorTab = { id, title: title ?? `Query ${seq}`, sql };
+    set((s) => ({ tabs: [...s.tabs, tab], activeTabId: id, tabSeq: seq, editorSql: sql }));
+    persist(get());
+    if (run && sql.trim()) void get().run(sql);
+  },
+
+  closeTab: (id) => {
+    const { tabs, activeTabId } = get();
+    if (tabs.length <= 1) {
+      // Never remove the last tab — clear it instead.
+      const cleared = [{ ...tabs[0], sql: "", title: "Query 1" }];
+      set({ tabs: cleared, activeTabId: cleared[0].id, editorSql: "" });
+      persist(get());
+      return;
+    }
+    const idx = tabs.findIndex((t) => t.id === id);
+    const remaining = tabs.filter((t) => t.id !== id);
+    let nextActive = activeTabId;
+    if (activeTabId === id) nextActive = (remaining[idx - 1] ?? remaining[0]).id;
+    const nextSql = remaining.find((t) => t.id === nextActive)?.sql ?? "";
+    set({ tabs: remaining, activeTabId: nextActive, editorSql: nextSql });
+    persist(get());
+  },
+
+  setActiveTab: (id) => {
+    const tab = get().tabs.find((t) => t.id === id);
+    if (!tab) return;
+    set({ activeTabId: id, editorSql: tab.sql });
     persist(get());
   },
 
@@ -222,6 +355,8 @@ export const usePlayground = create<PlaygroundState>((set, get) => ({
     const outcome = await engine.exec(toRun);
     set({ outcome, running: false, lastRunSql: toRun });
     await get().refreshSchema();
+    // Persist if the query changed data (INSERT/UPDATE/DELETE/DDL).
+    if (outcome.ok && isMutating(toRun)) await saveSnapshot(get().dialect, engine);
   },
 
   applySetup: async (sql) => {
@@ -236,6 +371,7 @@ export const usePlayground = create<PlaygroundState>((set, get) => ({
       set({ setupSql, activeSampleId: null });
       await get().refreshSchema();
       persist(get());
+      await saveSnapshot(get().dialect, engine);
     }
     return outcome;
   },
@@ -255,7 +391,21 @@ export const usePlayground = create<PlaygroundState>((set, get) => ({
     const { engine } = get();
     if (!engine) return;
     await engine.reset();
-    set({ setupSql: "", outcome: null, activeSampleId: null });
+    // Full wipe: drop tables, clear all editor tabs, and purge persisted storage.
+    const id = newTabId();
+    set({
+      setupSql: "",
+      editorSql: "",
+      tabs: [{ id, title: "Query 1", sql: "" }],
+      activeTabId: id,
+      tabSeq: 1,
+      outcome: null,
+      lastRunSql: "",
+      activeSampleId: null,
+    });
+    if (typeof window !== "undefined") localStorage.removeItem(LS_KEY);
+    // Delete saved DB snapshots for every dialect.
+    await Promise.all(DIALECTS.map((d) => idbDel(`db:${d.id}`)));
     await get().refreshSchema();
     persist(get());
   },
@@ -267,9 +417,21 @@ export const usePlayground = create<PlaygroundState>((set, get) => ({
     await engine.reset();
     const setup = sampleSql(sample, dialect);
     await engine.exec(setup);
-    set({ setupSql: setup, editorSql: sample.query, outcome: null, activeSampleId: sample.id });
+    // Put the sample query into the active tab.
+    const { tabs, activeTabId } = get();
+    const nextTabs = tabs.map((t) =>
+      t.id === activeTabId ? { ...t, sql: sample.query, title: sample.name } : t
+    );
+    set({
+      setupSql: setup,
+      editorSql: sample.query,
+      tabs: nextTabs,
+      outcome: null,
+      activeSampleId: sample.id,
+    });
     await get().refreshSchema();
     persist(get());
+    await saveSnapshot(dialect, engine);
   },
 
   toggleTheme: () => {

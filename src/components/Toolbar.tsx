@@ -36,7 +36,7 @@ export default function Toolbar({
     setAiEnabled,
     resetDatabase,
     loadSample,
-    setEditorSql,
+    newTab,
   } = usePlayground();
   const [samplesOpen, setSamplesOpen] = useState(false);
   const [examplesOpen, setExamplesOpen] = useState(false);
@@ -102,9 +102,7 @@ export default function Toolbar({
                 key={e.id}
                 className="w-full text-left px-2 py-2 rounded hover:bg-hover"
                 onClick={() => {
-                  const sql = exampleSql(e, dialect);
-                  setEditorSql(sql);
-                  void run(sql);
+                  newTab({ sql: exampleSql(e, dialect), title: e.name, run: true });
                   setExamplesOpen(false);
                 }}
               >

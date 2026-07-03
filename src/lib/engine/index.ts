@@ -3,7 +3,7 @@ import { PgliteEngine } from "./pglite-engine";
 import { SqlJsEngine } from "./sqljs-engine";
 
 export * from "./types";
-export { splitStatements, statementKind, statementRanges, statementAtOffset } from "./split";
+export { splitStatements, statementKind, statementRanges, statementAtOffset, returnsRows } from "./split";
 export type { StatementRange } from "./split";
 
 /** Create a fresh engine for the given dialect. */

@@ -3,7 +3,7 @@
 import Editor, { type OnMount } from "@monaco-editor/react";
 import { usePlayground } from "@/lib/store";
 import { useEffect, useRef } from "react";
-import { Play } from "lucide-react";
+import { Play, Plus, X } from "lucide-react";
 import { statementAtOffset } from "@/lib/engine";
 import {
   columnsForQualifier,
@@ -19,6 +19,11 @@ export default function SqlEditor() {
   const setEditorSql = usePlayground((s) => s.setEditorSql);
   const run = usePlayground((s) => s.run);
   const theme = usePlayground((s) => s.theme);
+  const tabs = usePlayground((s) => s.tabs);
+  const activeTabId = usePlayground((s) => s.activeTabId);
+  const newTab = usePlayground((s) => s.newTab);
+  const closeTab = usePlayground((s) => s.closeTab);
+  const setActiveTab = usePlayground((s) => s.setActiveTab);
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null);
   const monacoRef = useRef<Parameters<OnMount>[1] | null>(null);
   const completionDisposable = useRef<{ dispose: () => void } | null>(null);
@@ -54,6 +59,12 @@ export default function SqlEditor() {
     // Dispose the completion provider when the editor unmounts.
     return () => completionDisposable.current?.dispose();
   }, []);
+
+  // Switching tabs changes the value programmatically (no onChange) — re-lint.
+  useEffect(() => {
+    runLint(editorSql);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTabId]);
 
   const runCurrent = () => {
     const ed = editorRef.current;
@@ -93,6 +104,11 @@ export default function SqlEditor() {
     runLint(editor.getValue());
     // Cmd/Ctrl + Enter runs (selection if any, else the statement at the cursor).
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, runCurrent);
+    // Shift + Cmd/Ctrl + N → new editor tab (browser may reserve this; the + button always works).
+    editor.addCommand(
+      monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyN,
+      () => usePlayground.getState().newTab()
+    );
 
     // Schema-aware autocomplete. Reads the latest schema/dialect from the store
     // on every keystroke, so new tables/columns show up immediately.
@@ -197,12 +213,51 @@ export default function SqlEditor() {
   return (
     <div className="h-full flex flex-col">
       <div
-        className="flex items-center justify-between px-3 h-9 border-b bg-panel text-xs text-muted shrink-0"
+        className="flex items-center h-9 border-b bg-panel shrink-0"
         style={{ borderColor: "var(--border)" }}
       >
-        <span>Place the cursor in a statement and press ⌘/Ctrl+⏎ to run just that one</span>
+        {/* Editor tabs (VS Code style) */}
+        <div className="flex items-stretch overflow-x-auto flex-1 min-w-0">
+          {tabs.map((t) => {
+            const active = t.id === activeTabId;
+            return (
+              <div
+                key={t.id}
+                onClick={() => setActiveTab(t.id)}
+                className="group flex items-center gap-1.5 px-3 border-r cursor-pointer text-xs whitespace-nowrap"
+                style={{
+                  borderColor: "var(--border)",
+                  background: active ? "var(--bg)" : "transparent",
+                  color: active ? "var(--text)" : "var(--muted)",
+                  borderBottom: active ? "2px solid var(--accent)" : "2px solid transparent",
+                }}
+                title={t.title}
+              >
+                <span className="max-w-[140px] truncate">{t.title}</span>
+                <button
+                  className="opacity-0 group-hover:opacity-100 hover:text-bad shrink-0"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    closeTab(t.id);
+                  }}
+                  title="Close tab"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+            );
+          })}
+          <button
+            className="px-2 text-muted hover:text-app shrink-0"
+            onClick={() => newTab()}
+            title="New query tab (⇧⌘N)"
+          >
+            <Plus className="w-4 h-4" />
+          </button>
+        </div>
+
         <button
-          className="btn !py-1 !px-2"
+          className="btn !py-1 !px-2 mr-2 shrink-0"
           onClick={runCurrent}
           title="Run the selection, or the statement under the cursor (⌘/Ctrl+⏎)"
         >

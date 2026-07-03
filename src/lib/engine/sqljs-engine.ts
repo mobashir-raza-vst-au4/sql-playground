@@ -115,4 +115,18 @@ export class SqlJsEngine implements DbEngine {
     this.db = null;
     await this.init();
   }
+
+  async snapshot(): Promise<Uint8Array | null> {
+    try {
+      return this.instance.export();
+    } catch {
+      return null;
+    }
+  }
+
+  async restore(data: Uint8Array): Promise<void> {
+    const SQL = await loadSqlJs();
+    this.db?.close();
+    this.db = new SQL.Database(data);
+  }
 }

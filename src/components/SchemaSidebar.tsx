@@ -14,8 +14,7 @@ export default function SchemaSidebar({
   const schema = usePlayground((s) => s.schema);
   const dialect = usePlayground((s) => s.dialect);
   const refreshSchema = usePlayground((s) => s.refreshSchema);
-  const setEditorSql = usePlayground((s) => s.setEditorSql);
-  const run = usePlayground((s) => s.run);
+  const newTab = usePlayground((s) => s.newTab);
   const applySetup = usePlayground((s) => s.applySetup);
   const [open, setOpen] = useState<Record<string, boolean>>({});
   // In-app confirmation (window.confirm is unreliable in embedded/iframe views).
@@ -25,10 +24,9 @@ export default function SchemaSidebar({
 
   const toggle = (t: string) => setOpen((o) => ({ ...o, [t]: !o[t] }));
 
+  // Open the SELECT in a NEW tab so the user's current query isn't lost.
   const peek = (table: string) => {
-    const sql = `SELECT * FROM "${table}" LIMIT 100;`;
-    setEditorSql(sql);
-    void run(sql);
+    newTab({ sql: `SELECT * FROM "${table}" LIMIT 100;`, title: table, run: true });
   };
 
   // Clear rows / drop go through applySetup so the change persists across
@@ -40,7 +38,7 @@ export default function SchemaSidebar({
     const sql =
       type === "clear" ? `DELETE FROM "${table}";` : `DROP TABLE "${table}"${cascade};`;
     setWorking(true);
-    setEditorSql(sql);
+    newTab({ sql, title: type === "clear" ? "Clear rows" : "Drop table" });
     const outcome = await applySetup(sql);
     setWorking(false);
     if (!outcome.ok) {

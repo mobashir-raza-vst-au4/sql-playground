@@ -101,12 +101,10 @@ CROSS JOIN colors c;`,
 ];
 
 export default function JoinGuide({ onClose }: { onClose: () => void }) {
-  const setEditorSql = usePlayground((s) => s.setEditorSql);
-  const run = usePlayground((s) => s.run);
+  const newTab = usePlayground((s) => s.newTab);
 
-  const tryIt = (sql: string) => {
-    setEditorSql(sql);
-    void run(sql);
+  const tryIt = (sql: string, title: string) => {
+    newTab({ sql, title, run: true });
     onClose();
   };
 
@@ -158,7 +156,7 @@ export default function JoinGuide({ onClose }: { onClose: () => void }) {
                 <p className="text-[11px] mt-1.5 text-muted">
                   <b style={{ color: "var(--text)" }}>Result:</b> {g.result}
                 </p>
-                <button className="btn !py-1 !px-2 text-xs mt-2 self-start" onClick={() => tryIt(g.example)}>
+                <button className="btn !py-1 !px-2 text-xs mt-2 self-start" onClick={() => tryIt(g.example, g.title)}>
                   <Play className="w-3 h-3" /> Try it &amp; visualize
                 </button>
               </div>

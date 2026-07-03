@@ -103,4 +103,21 @@ export class PgliteEngine implements DbEngine {
     this.db = null;
     await this.init();
   }
+
+  async snapshot(): Promise<Uint8Array | null> {
+    try {
+      const blob = await this.instance.dumpDataDir();
+      return new Uint8Array(await blob.arrayBuffer());
+    } catch {
+      return null;
+    }
+  }
+
+  async restore(data: Uint8Array): Promise<void> {
+    const { PGlite } = await import("@electric-sql/pglite");
+    // dumpDataDir() produces a gzipped tar of the data directory.
+    const blob = new Blob([data as unknown as BlobPart], { type: "application/x-gzip" });
+    this.db = new PGlite({ loadDataDir: blob });
+    await this.db.waitReady;
+  }
 }

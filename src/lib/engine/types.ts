@@ -64,4 +64,8 @@ export interface DbEngine {
   introspect(): Promise<TableMeta[]>;
   /** Drop everything and start fresh. */
   reset(): Promise<void>;
+  /** Serialize the entire database (schema + data) for persistence. */
+  snapshot(): Promise<Uint8Array | null>;
+  /** Rebuild the database from a snapshot produced by snapshot(). */
+  restore(data: Uint8Array): Promise<void>;
 }
