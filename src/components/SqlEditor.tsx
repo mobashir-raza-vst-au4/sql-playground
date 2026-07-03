@@ -24,6 +24,8 @@ export default function SqlEditor() {
   const newTab = usePlayground((s) => s.newTab);
   const closeTab = usePlayground((s) => s.closeTab);
   const setActiveTab = usePlayground((s) => s.setActiveTab);
+  const reorderTab = usePlayground((s) => s.reorderTab);
+  const dragId = useRef<string | null>(null);
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null);
   const monacoRef = useRef<Parameters<OnMount>[1] | null>(null);
   const completionDisposable = useRef<{ dispose: () => void } | null>(null);
@@ -224,7 +226,19 @@ export default function SqlEditor() {
               <div
                 key={t.id}
                 onClick={() => setActiveTab(t.id)}
-                className="group flex items-center gap-1.5 px-3 border-r cursor-pointer text-xs whitespace-nowrap"
+                draggable
+                onDragStart={(e) => {
+                  dragId.current = t.id;
+                  e.dataTransfer.effectAllowed = "move";
+                }}
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  if (dragId.current) reorderTab(dragId.current, t.id);
+                  dragId.current = null;
+                }}
+                onDragEnd={() => (dragId.current = null)}
+                className="group flex items-center gap-1.5 px-3 border-r cursor-pointer text-xs whitespace-nowrap select-none"
                 style={{
                   borderColor: "var(--border)",
                   background: active ? "var(--bg)" : "transparent",

@@ -97,6 +97,7 @@ interface PlaygroundState {
   newTab: (opts?: { sql?: string; title?: string; run?: boolean }) => void;
   closeTab: (id: string) => void;
   setActiveTab: (id: string) => void;
+  reorderTab: (fromId: string, toId: string) => void;
   run: (sql?: string) => Promise<void>;
   /** Run SQL and also fold it into setupSql so it persists across resets. */
   applySetup: (sql: string) => Promise<QueryOutcome>;
@@ -356,6 +357,19 @@ export const usePlayground = create<PlaygroundState>((set, get) => ({
     const tab = get().tabs.find((t) => t.id === id);
     if (!tab) return;
     set({ activeTabId: id, editorSql: tab.sql });
+    persist(get());
+  },
+
+  reorderTab: (fromId, toId) => {
+    if (fromId === toId) return;
+    const tabs = [...get().tabs];
+    const from = tabs.findIndex((t) => t.id === fromId);
+    if (from < 0) return;
+    const [moved] = tabs.splice(from, 1);
+    const target = tabs.findIndex((t) => t.id === toId);
+    if (target < 0) return;
+    tabs.splice(target, 0, moved); // drop before the target tab
+    set({ tabs });
     persist(get());
   },
 
