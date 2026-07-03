@@ -1,43 +1,48 @@
 # SQL Playground
 
-An interactive, in-browser SQL playground to **learn, run, and (soon) visualize** SQL.
-Everything runs client-side — no backend, no signup, no cost. Your work is saved in your browser.
+**Learn, run & visualize SQL — entirely in your browser.**
 
-## Features (Phase 1 — MVP)
+🔗 **Live:** https://sql-playground-xi.vercel.app
 
-- **Real database engines in the browser (WASM)**
-  - **PostgreSQL** via [PGlite](https://github.com/electric-sql/pglite) — actual Postgres.
-  - **SQLite** via [sql.js](https://sql.js.org).
-  - **MySQL** (beta) — emulated on the SQLite engine for now; real MySQL WASM is planned.
-- **Run any statement** — SELECT, INSERT, UPDATE, DELETE, and full DDL (CREATE/ALTER/DROP…). Multiple statements per run.
-- **Monaco editor** with SQL highlighting. `⌘/Ctrl + Enter` runs the selection, or the whole buffer.
-- **Results grid** — rows for reads, "N rows affected" for writes, execution time, and clear error messages.
-- **Visual schema sidebar** — live introspection of tables, columns, types, primary keys, row counts. Click to `SELECT *`.
-- **Visual table builder** — create tables with columns, types (per-dialect), PK & NOT NULL constraints, and seed data via a grid — no SQL required. Preview the generated SQL before applying.
-- **Sample datasets** — load a ready-made schema (e.g. e-commerce) to start practicing JOINs immediately.
-- **Dark / light theme** toggle (defaults to dark), persisted.
-- **Autosave** — dialect, editor contents, and your schema persist in `localStorage`.
+A free, interactive SQL playground with no signup and no backend. Real database
+engines run in your browser via WebAssembly, so queries are instant and private.
 
-## Roadmap
+## Features
 
-- **Phase 2 — Query visualizer:** animate how JOINs match rows across tables, GROUP BY buckets, filters, etc.
-- **Phase 3 — AI assistant (toggleable, BYO Claude API key):** explain a query step by step, suggest fixes, and narrate the visualization.
+- **Real engines in-browser (WASM)** — PostgreSQL ([PGlite](https://github.com/electric-sql/pglite)), SQLite ([sql.js](https://sql.js.org)); MySQL emulated (beta).
+- **Every statement type** — SELECT / INSERT / UPDATE / DELETE / DDL, multiple statements per run.
+- **Monaco editor** — run-at-cursor (`⌘/Ctrl+Enter`), schema-aware autocomplete with auto-quoting, and an inline linter (bare `OUTER JOIN`, `= NULL`, unquoted `LIKE`).
+- **Visual table builder** — columns, types, constraints, and seed data via a grid **or** pasted JSON.
+- **Live schema sidebar** — introspection, `SELECT *`, clear-rows, and drop actions.
+- **Query visualizer** — animated JOIN row-matching with Venn diagrams, and a real-row-count execution pipeline (FROM → JOIN → WHERE → GROUP BY → …). Also visualizes writes/DDL.
+- **JOIN guide** — INNER / LEFT / RIGHT / FULL / CROSS explained with diagrams and examples.
+- **Dialect-aware examples** — see where Postgres/SQLite/MySQL diverge (`ILIKE`, `CONCAT` vs `||`).
+- **AI Tutor (bring your own key)** — Claude, ChatGPT, or **Google Gemini (free tier)** — explain, optimize, fix queries, and narrate the visualizer.
+- **Dark/light theme**, autosaved to your browser.
+
+## Tech stack
+
+Next.js 14 · React 18 · TypeScript · Tailwind CSS · Zustand · Monaco · PGlite · sql.js · Anthropic/OpenAI/Gemini APIs · deployed on Vercel.
 
 ## Getting started
 
 ```bash
 npm install
-npm run dev
+npm run dev      # http://localhost:3000
 ```
 
-Open http://localhost:3000.
-
-Requires **Node 18.18+** (developed on Node 24 LTS).
+Requires Node 18.18+ (developed on Node 24 LTS). The sql.js WASM binary is copied
+into `public/` automatically before `dev`/`build`.
 
 ## How it works
 
-- `src/lib/engine/` — a `DbEngine` interface with `PgliteEngine` and `SqlJsEngine` implementations, a dialect-aware statement splitter, and a factory. This abstraction is what lets new dialects (and the future AI layer) slot in cleanly.
-- `src/lib/store.ts` — Zustand store: engine lifecycle, running queries, schema introspection, persistence, and theming.
-- `src/components/` — `Playground`, `Toolbar`, `SqlEditor` (Monaco), `ResultsPanel`, `SchemaSidebar`, `TableBuilder`.
+Your SQL never leaves the browser. `PGlite` (real Postgres) and `sql.js` (real
+SQLite) are compiled to WebAssembly and run in-memory in the tab. A common
+`DbEngine` interface normalizes results; the visualizer runs extra real queries
+against the same engine to compute JOIN matches and per-stage row counts. The
+only server code is `/api/ai`, a serverless function that proxies the AI
+provider so your key avoids CORS and stays out of the bundle.
 
-The sql.js wasm binary is copied into `public/sql-wasm.wasm` automatically before `dev`/`build` (see `scripts/copy-sqljs-wasm.mjs`).
+## License
+
+MIT
