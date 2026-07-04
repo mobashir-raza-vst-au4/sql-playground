@@ -48,6 +48,13 @@ JOIN/pipeline visualizer, JOIN guide, AI tutor, IndexedDB persistence).
 | **Sortable/filterable results grid** | Column sort, filter, pagination, copy cell. | Medium | Medium |
 | **Format SQL** | Prettify button (sql-formatter) + snippet library. | Medium | Low |
 | **Query history panel** | Every run recorded; click to restore. | Medium | Low |
+| **Resizable panels** | Drag to resize the schema sidebar, the results/bottom panel, and the AI panel — like VS Code. Panels remember their size. | Medium | Medium |
+
+## 🗂️ Workspaces & projects
+
+| Feature | Description | Impact | Effort |
+|---|---|---|---|
+| **Multiple projects** | Separate named workspaces, each with its own tables and data (e.g. "HRM system", "Traffic control", "E-commerce"). Switch between projects; each persists independently. | High | Medium-High |
 
 ## 🗺️ Schema visualization
 
