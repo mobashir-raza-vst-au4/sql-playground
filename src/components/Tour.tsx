@@ -13,6 +13,11 @@ interface Step {
 
 const STEPS: Step[] = [
   {
+    sel: '[data-tour="projects"]',
+    title: "Projects",
+    body: "Keep separate workspaces here — an \"E-commerce\" schema, an \"HR\" one, a scratchpad. Each project has its own tables, data and query tabs, saved independently. Create, rename or switch anytime.",
+  },
+  {
     sel: '[data-tour="schema"]',
     title: "Your tables",
     body: "Every table lives here. Click one to expand it — run SELECT *, clear rows, or drop it. Your tables and data are saved in the browser and survive a refresh.",

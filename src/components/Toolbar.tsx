@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import Logo from "./Logo";
+import ProjectMenu from "./ProjectMenu";
 
 export default function Toolbar({
   onNewTable,
@@ -73,6 +74,9 @@ export default function Toolbar({
       </div>
 
       <div className="w-px h-6 mx-1 hidden sm:block" style={{ background: "var(--border)" }} />
+
+      {/* Project switcher (named workspaces) */}
+      <ProjectMenu />
 
       {/* Dialect */}
       <label className="flex items-center gap-2 text-sm text-muted">

@@ -144,7 +144,7 @@ export default function AiPanel() {
 
   return (
     <aside
-      className="w-full md:w-[360px] shrink-0 border-l bg-panel flex flex-col min-h-0 h-full"
+      className="w-full shrink-0 border-l bg-panel flex flex-col min-h-0 h-full"
       style={{ borderColor: "var(--border)" }}
     >
       {/* header */}

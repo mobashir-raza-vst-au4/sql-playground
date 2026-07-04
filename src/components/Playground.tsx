@@ -11,6 +11,7 @@ import JoinGuide from "./JoinGuide";
 import AiPanel from "./AiPanel";
 import Tour from "./Tour";
 import CsvImport, { type CsvData } from "./CsvImport";
+import ResizeHandle, { usePersistedSize } from "./ResizeHandle";
 import { parseCsv } from "@/lib/csv";
 import { Database, FileUp } from "lucide-react";
 
@@ -32,9 +33,32 @@ export default function Playground() {
   const [dragging, setDragging] = useState(false);
   const dragDepth = useRef(0);
 
+  // Resizable panels (desktop only). Sizes are remembered across sessions.
+  const [isDesktop, setIsDesktop] = useState(true);
+  const [sidebarW, setSidebarW] = usePersistedSize("sqlpg:panel:sidebarW", 256);
+  const [resultsH, setResultsH] = usePersistedSize("sqlpg:panel:resultsH", 300);
+  const [aiW, setAiW] = usePersistedSize("sqlpg:panel:aiW", 360);
+  const mainRef = useRef<HTMLElement>(null);
+
   useEffect(() => {
     void init();
   }, [init]);
+
+  // Track whether we're at the md+ breakpoint (Tailwind's 768px). Below it, the
+  // sidebar/AI become overlays and the fixed mobile layout is used instead.
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 768px)");
+    const update = () => setIsDesktop(mq.matches);
+    update();
+    mq.addEventListener("change", update);
+    return () => mq.removeEventListener("change", update);
+  }, []);
+
+  // Clamp the results height so the editor always keeps at least ~140px.
+  const clampResults = (n: number) => {
+    const h = mainRef.current?.clientHeight ?? 600;
+    setResultsH(Math.max(120, Math.min(n, h - 140)));
+  };
 
   // Handle one or more dropped/selected files: each CSV → a queued import
   // (reviewed one at a time); each .sql → run + shown in a tab.
@@ -81,6 +105,21 @@ export default function Playground() {
     setBuilderOpen(true);
   };
 
+  // Shared sidebar element (reused by both the desktop and mobile layouts).
+  const sidebar = (
+    <SchemaSidebar
+      onNewTable={() => {
+        openBuilder();
+        setSidebarOpen(false);
+      }}
+      onEditTable={(t) => {
+        openBuilder(t);
+        setSidebarOpen(false);
+      }}
+      onImportFile={(files) => void handleFiles(files)}
+    />
+  );
+
   return (
     <div
       className="h-screen flex flex-col bg-bg text-app overflow-hidden relative"
@@ -107,33 +146,37 @@ export default function Playground() {
       />
 
       <div className="flex-1 flex min-h-0 relative">
-        {/* Schema sidebar — static on md+, slide-in drawer on mobile */}
-        <div
-          className={`absolute md:static inset-y-0 left-0 z-40 md:z-auto h-full transition-transform md:translate-x-0 ${
-            sidebarOpen ? "translate-x-0" : "-translate-x-full"
-          }`}
-        >
-          <SchemaSidebar
-            onNewTable={() => {
-              openBuilder();
-              setSidebarOpen(false);
-            }}
-            onEditTable={(t) => {
-              openBuilder(t);
-              setSidebarOpen(false);
-            }}
-            onImportFile={(files) => void handleFiles(files)}
-          />
-        </div>
-        {/* backdrop when the mobile drawer is open */}
-        {sidebarOpen && (
-          <div
-            className="md:hidden absolute inset-0 z-30 bg-black/50"
-            onClick={() => setSidebarOpen(false)}
-          />
+        {/* Schema sidebar — resizable on md+, slide-in drawer on mobile */}
+        {isDesktop ? (
+          <>
+            <div style={{ width: sidebarW }} className="shrink-0 h-full">
+              {sidebar}
+            </div>
+            <ResizeHandle
+              axis="x"
+              value={sidebarW}
+              min={200}
+              max={560}
+              onChange={setSidebarW}
+              label="Resize schema sidebar"
+            />
+          </>
+        ) : (
+          <>
+            <div
+              className={`absolute inset-y-0 left-0 z-40 h-full w-64 transition-transform ${
+                sidebarOpen ? "translate-x-0" : "-translate-x-full"
+              }`}
+            >
+              {sidebar}
+            </div>
+            {sidebarOpen && (
+              <div className="absolute inset-0 z-30 bg-black/50" onClick={() => setSidebarOpen(false)} />
+            )}
+          </>
         )}
 
-        <main className="flex-1 flex flex-col min-w-0">
+        <main ref={mainRef} className="flex-1 flex flex-col min-w-0">
           {!ready ? (
             <div className="flex-1 flex flex-col items-center justify-center gap-3 text-muted">
               <Database className="w-8 h-8 spin text-accent" />
@@ -141,22 +184,59 @@ export default function Playground() {
             </div>
           ) : (
             <>
-              <div className="flex-1 min-h-0 border-b border-app" style={{ borderColor: "var(--border)" }}>
+              <div
+                className="flex-1 min-h-0"
+                style={isDesktop ? undefined : { borderBottom: "1px solid var(--border)" }}
+              >
                 <SqlEditor />
               </div>
-              <div className="h-[42%] min-h-[180px]">
-                <ResultsPanel />
-              </div>
+              {isDesktop ? (
+                <>
+                  <ResizeHandle
+                    axis="y"
+                    value={resultsH}
+                    min={120}
+                    max={9999}
+                    invert
+                    onChange={clampResults}
+                    label="Resize results panel"
+                  />
+                  <div style={{ height: resultsH, maxHeight: "calc(100% - 140px)" }} className="shrink-0">
+                    <ResultsPanel />
+                  </div>
+                </>
+              ) : (
+                <div className="h-[42%] min-h-[180px]">
+                  <ResultsPanel />
+                </div>
+              )}
             </>
           )}
         </main>
 
-        {/* AI panel — side panel on md+, full-screen overlay on mobile */}
-        {ready && aiEnabled && (
-          <div className="absolute md:static inset-0 md:inset-auto z-40 md:z-auto h-full">
-            <AiPanel />
-          </div>
-        )}
+        {/* AI panel — resizable side panel on md+, full-screen overlay on mobile */}
+        {ready &&
+          aiEnabled &&
+          (isDesktop ? (
+            <>
+              <ResizeHandle
+                axis="x"
+                value={aiW}
+                min={280}
+                max={680}
+                invert
+                onChange={setAiW}
+                label="Resize AI panel"
+              />
+              <div style={{ width: aiW }} className="shrink-0 h-full">
+                <AiPanel />
+              </div>
+            </>
+          ) : (
+            <div className="absolute inset-0 z-40 h-full">
+              <AiPanel />
+            </div>
+          ))}
       </div>
 
       {builderOpen && (

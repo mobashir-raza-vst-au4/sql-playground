@@ -19,6 +19,8 @@ JOIN/pipeline visualizer, JOIN guide, AI tutor, IndexedDB persistence).
 - Sortable table list (name A–Z / Z–A, newest, oldest created)
 - First-run guided tour / coach marks (spotlight + tooltips), replayable via the help button
 - Dark/light theme, responsive layout, SEO (metadata, OG image, sitemap, JSON-LD)
+- **Multiple projects** — named workspaces, each with its own tables, data and query tabs, persisted independently (switcher in the toolbar; create / rename / delete / switch)
+- **Resizable panels** — drag to resize the schema sidebar, results panel and AI panel (VS Code style); sizes remembered, double-click a divider to reset
 - Deployed on Vercel with auto-deploy from GitHub
 
 ---
@@ -48,13 +50,6 @@ JOIN/pipeline visualizer, JOIN guide, AI tutor, IndexedDB persistence).
 | **Sortable/filterable results grid** | Column sort, filter, pagination, copy cell. | Medium | Medium |
 | **Format SQL** | Prettify button (sql-formatter) + snippet library. | Medium | Low |
 | **Query history panel** | Every run recorded; click to restore. | Medium | Low |
-| **Resizable panels** | Drag to resize the schema sidebar, the results/bottom panel, and the AI panel — like VS Code. Panels remember their size. | Medium | Medium |
-
-## 🗂️ Workspaces & projects
-
-| Feature | Description | Impact | Effort |
-|---|---|---|---|
-| **Multiple projects** | Separate named workspaces, each with its own tables and data (e.g. "HRM system", "Traffic control", "E-commerce"). Switch between projects; each persists independently. | High | Medium-High |
 
 ## 🗺️ Schema visualization
 

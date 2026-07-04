@@ -15,11 +15,59 @@ import { defaultModel, type AiProvider } from "./ai";
 import { idbGet, idbSet, idbDel } from "./idb";
 import { DIALECTS } from "./engine";
 
+// ---------------------------------------------------------------------------
+// Projects — each is a named workspace with its own tables/data. Everything
+// that used to be a single global key is now namespaced by project id:
+//   workspace metadata → sqlpg:workspace:v1:<projectId>   (localStorage)
+//   database snapshot   → db:<projectId>:<dialect>        (IndexedDB)
+// ---------------------------------------------------------------------------
+const PROJECTS_KEY = "sqlpg:projects";
+const wsKey = (projectId: string) => `sqlpg:workspace:v1:${projectId}`;
+const dbKey = (projectId: string, dialect: string) => `db:${projectId}:${dialect}`;
+
+export interface ProjectMeta {
+  id: string;
+  name: string;
+  createdAt: number;
+}
+interface ProjectsFile {
+  activeId: string;
+  list: ProjectMeta[];
+}
+
+function newProjectId(): string {
+  try {
+    if (typeof crypto !== "undefined" && crypto.randomUUID) return `p-${crypto.randomUUID()}`;
+  } catch {
+    /* fall through */
+  }
+  return `p-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
+}
+
+function loadProjectsFile(): ProjectsFile | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(PROJECTS_KEY);
+    return raw ? (JSON.parse(raw) as ProjectsFile) : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveProjectsFile(f: ProjectsFile) {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(PROJECTS_KEY, JSON.stringify(f));
+  } catch {
+    /* ignore quota errors */
+  }
+}
+
 /** Persist the full database (schema + data) so a refresh keeps everything. */
-async function saveSnapshot(dialect: Dialect, engine: DbEngine): Promise<void> {
+async function saveSnapshot(projectId: string, dialect: Dialect, engine: DbEngine): Promise<void> {
   try {
     const snap = await engine.snapshot();
-    if (snap) await idbSet(`db:${dialect}`, snap);
+    if (snap) await idbSet(dbKey(projectId, dialect), snap);
   } catch {
     /* best-effort */
   }
@@ -29,8 +77,6 @@ async function saveSnapshot(dialect: Dialect, engine: DbEngine): Promise<void> {
 function isMutating(sql: string): boolean {
   return splitStatements(sql).some((s) => !returnsRows(s));
 }
-
-const LS_KEY = "sqlpg:workspace:v1";
 
 /** One editor tab (VS Code style) — its own SQL and title. */
 export interface EditorTab {
@@ -96,8 +142,15 @@ interface PlaygroundState {
   /** A prompt handed to the AI panel from elsewhere (e.g. "explain this JOIN"). */
   aiPrompt: { text: string; id: number } | null;
   statusMessage: string | null;
+  /** Named workspaces. Each has its own tables/data + editor state, persisted independently. */
+  projects: ProjectMeta[];
+  activeProjectId: string;
 
   init: () => Promise<void>;
+  createProject: (name: string) => Promise<void>;
+  renameProject: (id: string, name: string) => void;
+  deleteProject: (id: string) => Promise<void>;
+  switchProject: (id: string) => Promise<void>;
   setDialect: (d: Dialect) => Promise<void>;
   setEditorSql: (sql: string) => void;
   newTab: (opts?: { sql?: string; title?: string; run?: boolean }) => void;
@@ -121,10 +174,10 @@ interface PlaygroundState {
   clearAiPrompt: () => void;
 }
 
-function loadPersisted(): PersistedWorkspace | null {
-  if (typeof window === "undefined") return null;
+function loadPersisted(projectId: string): PersistedWorkspace | null {
+  if (typeof window === "undefined" || !projectId) return null;
   try {
-    const raw = localStorage.getItem(LS_KEY);
+    const raw = localStorage.getItem(wsKey(projectId));
     return raw ? (JSON.parse(raw) as PersistedWorkspace) : null;
   } catch {
     return null;
@@ -132,7 +185,7 @@ function loadPersisted(): PersistedWorkspace | null {
 }
 
 function persist(state: PlaygroundState) {
-  if (typeof window === "undefined") return;
+  if (typeof window === "undefined" || !state.activeProjectId) return;
   const data: PersistedWorkspace = {
     dialect: state.dialect,
     editorSql: state.editorSql,
@@ -144,10 +197,18 @@ function persist(state: PlaygroundState) {
     tableOrder: state.tableOrder,
     tableSort: state.tableSort,
   };
+  const key = wsKey(state.activeProjectId);
   try {
-    localStorage.setItem(LS_KEY, JSON.stringify(data));
+    localStorage.setItem(key, JSON.stringify(data));
   } catch {
-    /* ignore quota errors */
+    // Over quota — the setupSql (accumulated schema + seed inserts) can grow
+    // large. Retry without it: tables & data are already safe in the IndexedDB
+    // snapshot, so we only lose the cross-dialect re-seed script.
+    try {
+      localStorage.setItem(key, JSON.stringify({ ...data, setupSql: "" }));
+    } catch {
+      /* still too big — give up; the IndexedDB snapshot is authoritative */
+    }
   }
 }
 
@@ -161,7 +222,77 @@ function loadTheme(): Theme {
 // "Cannot compile WebAssembly.Module from an already read Response".
 let initPromise: Promise<void> | null = null;
 
-export const usePlayground = create<PlaygroundState>((set, get) => ({
+export const usePlayground = create<PlaygroundState>((set, get) => {
+  // Boots (or re-boots) the engine + editor state for a project. Used on first
+  // load, when switching projects, and when creating/deleting one. Assumes
+  // `activeProjectId` is already set on the state.
+  const bootProject = async (projectId: string, firstVisit: boolean): Promise<void> => {
+    const persisted = loadPersisted(projectId);
+    const dialect = persisted?.dialect ?? "postgres";
+    set({
+      dialect,
+      tableOrder: persisted?.tableOrder ?? {},
+      tableSort: persisted?.tableSort ?? "name-asc",
+    });
+
+    const engine = createEngine(dialect);
+    set({ statusMessage: "Booting database engine…" });
+    await engine.init();
+
+    let setupSql = persisted?.setupSql ?? "";
+    let editorSql = persisted?.editorSql ?? "";
+    let activeSampleId = persisted?.activeSampleId ?? null;
+
+    // Restore this project's saved database (schema + data). Survives refreshes.
+    const snap = await idbGet(dbKey(projectId, dialect));
+    let restored = false;
+    if (snap) {
+      try {
+        await engine.restore(snap);
+        restored = true;
+      } catch {
+        restored = false;
+      }
+    }
+    if (!restored && setupSql.trim()) await engine.exec(setupSql);
+
+    set({ engine, dialect, ready: true, setupSql, editorSql, activeSampleId, statusMessage: null });
+    await get().refreshSchema();
+
+    // Seed the starter sample ONLY on a genuine first visit with an empty DB.
+    if (firstVisit && !snap && get().schema.length === 0) {
+      const sample = SAMPLES[0];
+      const seed = sampleSql(sample, dialect);
+      const res = await engine.exec(seed);
+      if (res.ok) {
+        setupSql = seed;
+        activeSampleId = sample.id;
+        if (!editorSql.trim()) editorSql = sample.query;
+        set({ setupSql, editorSql, activeSampleId });
+        await get().refreshSchema();
+      }
+    }
+
+    // Restore editor tabs, or create the first one from editorSql (migration).
+    let tabs = persisted?.tabs;
+    let activeTabId = persisted?.activeTabId ?? "";
+    let tabSeq = persisted?.tabSeq ?? 1;
+    if (!tabs || tabs.length === 0) {
+      const id = newTabId();
+      tabs = [{ id, title: "Query 1", sql: editorSql }];
+      activeTabId = id;
+      tabSeq = 1;
+    } else {
+      if (!tabs.some((t) => t.id === activeTabId)) activeTabId = tabs[0].id;
+      editorSql = tabs.find((t) => t.id === activeTabId)?.sql ?? "";
+    }
+    set({ tabs, activeTabId, tabSeq, editorSql });
+
+    persist(get());
+    await saveSnapshot(projectId, dialect, engine);
+  };
+
+  return {
   dialect: "postgres",
   engine: null,
   ready: false,
@@ -184,6 +315,8 @@ export const usePlayground = create<PlaygroundState>((set, get) => ({
   aiModel: "claude-opus-4-8",
   aiPrompt: null,
   statusMessage: null,
+  projects: [],
+  activeProjectId: "",
 
   init: async () => {
     // Run exactly once, even if called twice by StrictMode's double-mount.
@@ -191,14 +324,8 @@ export const usePlayground = create<PlaygroundState>((set, get) => ({
     if (get().ready) return;
 
     initPromise = (async () => {
-      const persisted = loadPersisted();
-      const dialect = persisted?.dialect ?? "postgres";
       const theme = loadTheme();
-      set({
-        theme,
-        tableOrder: persisted?.tableOrder ?? {},
-        tableSort: persisted?.tableSort ?? "name-asc",
-      });
+      set({ theme });
       applyThemeToDom(theme);
 
       // Restore AI settings (stored separately from the workspace, per provider).
@@ -212,68 +339,119 @@ export const usePlayground = create<PlaygroundState>((set, get) => ({
         });
       }
 
-      const engine = createEngine(dialect);
-      set({ statusMessage: "Booting database engine…" });
-      await engine.init();
-
-      let setupSql = persisted?.setupSql ?? "";
-      let editorSql = persisted?.editorSql ?? "";
-      let activeSampleId = persisted?.activeSampleId ?? null;
-
-      // Restore the full database (schema + data, including rows edited via the
-      // editor) from the last saved snapshot. This survives refreshes.
-      const snap = await idbGet(`db:${dialect}`);
-      let restored = false;
-      if (snap) {
-        try {
-          await engine.restore(snap);
-          restored = true;
-        } catch {
-          restored = false;
+      // Resolve the project registry. First run (or upgrade from the old
+      // single-workspace layout) → create a default project and migrate any
+      // existing workspace metadata + DB snapshots into it.
+      let pf = loadProjectsFile();
+      let firstVisit = false;
+      if (!pf) {
+        const id = newProjectId();
+        pf = { activeId: id, list: [{ id, name: "My Project", createdAt: Date.now() }] };
+        const legacy = typeof window !== "undefined" ? localStorage.getItem("sqlpg:workspace:v1") : null;
+        if (legacy) {
+          // Move (not copy) the old workspace so we don't briefly double its
+          // footprint and blow the localStorage quota. The DB snapshot in
+          // IndexedDB is the source of truth for tables/data, so even if this
+          // metadata write fails the project still restores correctly.
+          try {
+            localStorage.setItem(wsKey(id), legacy);
+          } catch {
+            /* quota — skip; snapshot below still carries the data */
+          }
+          localStorage.removeItem("sqlpg:workspace:v1");
         }
-      }
-      if (!restored && setupSql.trim()) {
-        await engine.exec(setupSql);
-      }
-
-      set({ engine, dialect, ready: true, setupSql, editorSql, activeSampleId, statusMessage: null });
-      await get().refreshSchema();
-
-      // Seed the sample ONLY on a true first visit (no snapshot at all). If the
-      // user previously reset to an empty DB, the snapshot is empty and honored.
-      if (!snap && get().schema.length === 0) {
-        const sample = SAMPLES[0];
-        const seed = sampleSql(sample, dialect);
-        const res = await engine.exec(seed);
-        if (res.ok) {
-          setupSql = seed;
-          activeSampleId = sample.id;
-          if (!editorSql.trim()) editorSql = sample.query;
-          set({ setupSql, editorSql, activeSampleId });
-          await get().refreshSchema();
+        for (const d of DIALECTS) {
+          const s = await idbGet(`db:${d.id}`);
+          if (s) {
+            await idbSet(dbKey(id, d.id), s);
+            await idbDel(`db:${d.id}`);
+          }
         }
+        saveProjectsFile(pf);
+        firstVisit = !legacy; // no prior data at all → seed the starter sample
       }
+      set({ projects: pf.list, activeProjectId: pf.activeId });
 
-      // Restore editor tabs, or create the first one from editorSql (migration).
-      let tabs = persisted?.tabs;
-      let activeTabId = persisted?.activeTabId ?? "";
-      let tabSeq = persisted?.tabSeq ?? 1;
-      if (!tabs || tabs.length === 0) {
-        const id = newTabId();
-        tabs = [{ id, title: "Query 1", sql: editorSql }];
-        activeTabId = id;
-        tabSeq = 1;
-      } else {
-        if (!tabs.some((t) => t.id === activeTabId)) activeTabId = tabs[0].id;
-        editorSql = tabs.find((t) => t.id === activeTabId)?.sql ?? "";
-      }
-      set({ tabs, activeTabId, tabSeq, editorSql });
-
-      persist(get());
-      await saveSnapshot(dialect, engine);
+      await bootProject(pf.activeId, firstVisit);
     })();
 
     return initPromise;
+  },
+
+  createProject: async (name) => {
+    // Save the current project before leaving it.
+    persist(get());
+    const { engine, dialect, activeProjectId } = get();
+    if (engine) await saveSnapshot(activeProjectId, dialect, engine);
+
+    const id = newProjectId();
+    const pf = loadProjectsFile() ?? { activeId: id, list: [] };
+    pf.list = [...pf.list, { id, name: name.trim() || "Untitled", createdAt: Date.now() }];
+    pf.activeId = id;
+    saveProjectsFile(pf);
+
+    // Fresh, empty workspace (no snapshot, no setup → blank DB + one empty tab).
+    set({
+      projects: pf.list,
+      activeProjectId: id,
+      ready: false,
+      statusMessage: "Creating project…",
+      outcome: null,
+      lastRunSql: "",
+      tableOrder: {},
+      setupSql: "",
+      activeSampleId: null,
+    });
+    await bootProject(id, false);
+  },
+
+  renameProject: (id, name) => {
+    const pf = loadProjectsFile();
+    if (!pf) return;
+    pf.list = pf.list.map((p) => (p.id === id ? { ...p, name: name.trim() || p.name } : p));
+    saveProjectsFile(pf);
+    set({ projects: pf.list });
+  },
+
+  deleteProject: async (id) => {
+    const pf = loadProjectsFile();
+    if (!pf || pf.list.length <= 1) return; // always keep at least one project
+    // Purge the deleted project's storage.
+    if (typeof window !== "undefined") localStorage.removeItem(wsKey(id));
+    await Promise.all(DIALECTS.map((d) => idbDel(dbKey(id, d.id))));
+
+    const wasActive = pf.activeId === id;
+    pf.list = pf.list.filter((p) => p.id !== id);
+    if (wasActive) pf.activeId = pf.list[0].id;
+    saveProjectsFile(pf);
+    set({ projects: pf.list, activeProjectId: pf.activeId });
+
+    if (wasActive) {
+      set({ ready: false, statusMessage: "Loading project…", outcome: null, lastRunSql: "" });
+      await bootProject(pf.activeId, false);
+    }
+  },
+
+  switchProject: async (id) => {
+    if (id === get().activeProjectId) return;
+    // Persist the outgoing project first.
+    persist(get());
+    const { engine, dialect, activeProjectId } = get();
+    if (engine) await saveSnapshot(activeProjectId, dialect, engine);
+
+    const pf = loadProjectsFile();
+    if (pf) {
+      pf.activeId = id;
+      saveProjectsFile(pf);
+    }
+    set({
+      activeProjectId: id,
+      ready: false,
+      statusMessage: "Loading project…",
+      outcome: null,
+      lastRunSql: "",
+    });
+    await bootProject(id, false);
   },
 
   setDialect: async (d) => {
@@ -285,7 +463,7 @@ export const usePlayground = create<PlaygroundState>((set, get) => ({
     let note: string | null = null;
 
     // Prefer this dialect's own saved snapshot (its persisted tables + data).
-    const snap = await idbGet(`db:${d}`);
+    const snap = await idbGet(dbKey(get().activeProjectId, d));
     let restored = false;
     if (snap) {
       try {
@@ -317,7 +495,7 @@ export const usePlayground = create<PlaygroundState>((set, get) => ({
     set({ engine, ready: true, statusMessage: note });
     await get().refreshSchema();
     persist(get());
-    await saveSnapshot(d, engine);
+    await saveSnapshot(get().activeProjectId, d, engine);
     if (note) setTimeout(() => set({ statusMessage: null }), 6000);
   },
 
@@ -398,7 +576,7 @@ export const usePlayground = create<PlaygroundState>((set, get) => ({
     set({ outcome, running: false, lastRunSql: toRun });
     await get().refreshSchema();
     // Persist if the query changed data (INSERT/UPDATE/DELETE/DDL).
-    if (outcome.ok && isMutating(toRun)) await saveSnapshot(get().dialect, engine);
+    if (outcome.ok && isMutating(toRun)) await saveSnapshot(get().activeProjectId, get().dialect, engine);
   },
 
   applySetup: async (sql) => {
@@ -415,7 +593,7 @@ export const usePlayground = create<PlaygroundState>((set, get) => ({
       // The workspace is now customized — no longer a pristine sample.
       set({ setupSql, activeSampleId: null });
       persist(get());
-      await saveSnapshot(get().dialect, engine);
+      await saveSnapshot(get().activeProjectId, get().dialect, engine);
     }
     return outcome;
   },
@@ -471,9 +649,10 @@ export const usePlayground = create<PlaygroundState>((set, get) => ({
       lastRunSql: "",
       activeSampleId: null,
     });
-    if (typeof window !== "undefined") localStorage.removeItem(LS_KEY);
-    // Delete saved DB snapshots for every dialect.
-    await Promise.all(DIALECTS.map((d) => idbDel(`db:${d.id}`)));
+    const pid = get().activeProjectId;
+    if (typeof window !== "undefined") localStorage.removeItem(wsKey(pid));
+    // Delete this project's saved DB snapshots for every dialect.
+    await Promise.all(DIALECTS.map((d) => idbDel(dbKey(pid, d.id))));
     await get().refreshSchema();
     persist(get());
   },
@@ -499,7 +678,7 @@ export const usePlayground = create<PlaygroundState>((set, get) => ({
     });
     await get().refreshSchema();
     persist(get());
-    await saveSnapshot(dialect, engine);
+    await saveSnapshot(get().activeProjectId, dialect, engine);
   },
 
   toggleTheme: () => {
@@ -545,7 +724,8 @@ export const usePlayground = create<PlaygroundState>((set, get) => ({
   },
 
   clearAiPrompt: () => set({ aiPrompt: null }),
-}));
+  };
+});
 
 function applyThemeToDom(theme: Theme) {
   if (typeof document === "undefined") return;

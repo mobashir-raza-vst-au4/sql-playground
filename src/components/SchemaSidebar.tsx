@@ -98,7 +98,7 @@ export default function SchemaSidebar({
 
   return (
     <aside
-      className="w-64 shrink-0 border-r bg-panel flex flex-col min-h-0 h-full"
+      className="w-full shrink-0 border-r bg-panel flex flex-col min-h-0 h-full"
       style={{ borderColor: "var(--border)" }}
       data-tour="schema"
     >
