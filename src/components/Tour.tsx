@@ -15,13 +15,30 @@ const STEPS: Step[] = [
   {
     sel: '[data-tour="schema"]',
     title: "Your tables",
-    body: "Every table lives here. Click one to expand it — run SELECT *, clear rows, drop it, or sort the list.",
+    body: "Every table lives here. Click one to expand it — run SELECT *, clear rows, or drop it. Your tables and data are saved in the browser and survive a refresh.",
+    openSidebar: true,
+  },
+  {
+    sel: '[data-tour="sort"]',
+    title: "Sort your tables",
+    body: "Order the table list by name (A–Z / Z–A) or by when it was created — newest or oldest first.",
+    openSidebar: true,
+  },
+  {
+    sel: '[data-tour="import-export"]',
+    title: "Import & export data",
+    body: "Import one or more CSV files to auto-create tables (or drag files anywhere onto the page). Export the whole database as a .sql file.",
     openSidebar: true,
   },
   {
     sel: '[data-tour="editor"]',
     title: "Write SQL",
-    body: "Type queries here. Put your cursor in a statement and press ⌘/Ctrl+Enter to run just that one. Open multiple tabs with the + (or ⇧⌘N).",
+    body: "Type queries here with autocomplete and inline hints. Put your cursor in a statement and press ⌘/Ctrl+Enter to run just that one.",
+  },
+  {
+    sel: '[data-tour="tabs"]',
+    title: "Multiple query tabs",
+    body: "Open several tabs with + (or ⇧⌘N) and drag to reorder them — each keeps its own SQL. SELECT * and examples open in a new tab so your work isn't lost.",
   },
   {
     sel: '[data-tour="run"]',
@@ -37,6 +54,11 @@ const STEPS: Step[] = [
     sel: '[data-tour="visualize"]',
     title: "Visualize",
     body: "Switch here to see JOINs animated and a step-by-step execution pipeline with real row counts.",
+  },
+  {
+    sel: '[data-tour="export-results"]',
+    title: "Export results",
+    body: "Download the current query's results as CSV or JSON. Large results scroll smoothly — every row is available.",
   },
   {
     sel: '[data-tour="newtable"]',

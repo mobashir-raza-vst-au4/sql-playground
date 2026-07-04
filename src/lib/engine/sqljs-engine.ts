@@ -28,6 +28,9 @@ export class SqlJsEngine implements DbEngine {
     if (this.db) return;
     const SQL = await loadSqlJs();
     this.db = new SQL.Database();
+    // SQLite disables FK enforcement by default; turn it on so ON DELETE
+    // CASCADE / foreign-key checks actually apply.
+    this.db.run("PRAGMA foreign_keys = ON;");
   }
 
   private get instance(): Database {
@@ -128,5 +131,6 @@ export class SqlJsEngine implements DbEngine {
     const SQL = await loadSqlJs();
     this.db?.close();
     this.db = new SQL.Database(data);
+    this.db.run("PRAGMA foreign_keys = ON;"); // per-connection; re-enable after restore
   }
 }

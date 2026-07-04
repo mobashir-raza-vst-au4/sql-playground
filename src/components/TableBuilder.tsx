@@ -3,13 +3,27 @@
 import { useMemo, useState } from "react";
 import { usePlayground } from "@/lib/store";
 import { autoPk, defaultType, TYPE_OPTIONS } from "@/lib/coltypes";
-import { X, Plus, Trash2, Key, Wand2, Play } from "lucide-react";
+import { X, Plus, Trash2, Key, Wand2, Play, Link2 } from "lucide-react";
+
+type OnDelete = "" | "cascade" | "setnull";
 
 interface Col {
   name: string;
   type: string;
   pk: boolean;
   notNull: boolean;
+  refTable?: string;
+  refColumn?: string;
+  onDelete?: OnDelete;
+}
+
+/** Build the `REFERENCES ...` clause for a column with a foreign key. */
+function fkClause(c: Col): string {
+  if (!c.refTable || !c.refColumn) return "";
+  let s = ` REFERENCES "${c.refTable}"("${c.refColumn}")`;
+  if (c.onDelete === "cascade") s += " ON DELETE CASCADE";
+  else if (c.onDelete === "setnull") s += " ON DELETE SET NULL";
+  return s;
 }
 
 function quoteVal(v: string): string {
@@ -72,7 +86,7 @@ export default function TableBuilder({
 
   const [tableName, setTableName] = useState(editTable ?? "");
   const [cols, setCols] = useState<Col[]>(() => {
-    if (isEdit) return []; // in edit mode we only ADD new columns
+    if (isEdit) return []; // in edit mode `cols` holds only NEW columns to add
     const pk = autoPk(dialect);
     return [
       { name: "id", type: pk.type, pk: true, notNull: true },
@@ -80,8 +94,21 @@ export default function TableBuilder({
     ];
   });
 
+  // Editable snapshot of the table's current columns (edit mode): rename + retype.
+  const [existingCols, setExistingCols] = useState<
+    { origName: string; name: string; origType: string; newType: string }[]
+  >(() =>
+    isEdit && existing
+      ? existing.columns.map((c) => ({ origName: c.name, name: c.name, origType: c.type, newType: "" }))
+      : []
+  );
+  const updateExisting = (
+    i: number,
+    patch: Partial<{ name: string; newType: string }>
+  ) => setExistingCols((cs) => cs.map((c, idx) => (idx === i ? { ...c, ...patch } : c)));
+
   // Seed rows: a grid of string values, one array per row, aligned to seed columns.
-  const seedCols = isEdit ? (existing?.columns.map((c) => c.name) ?? []) : cols.map((c) => c.name);
+  const seedCols = isEdit ? existingCols.map((c) => c.name.trim() || c.origName) : cols.map((c) => c.name);
   const [rows, setRows] = useState<string[][]>([]);
   const [seedMode, setSeedMode] = useState<"grid" | "json">("grid");
   const [jsonText, setJsonText] = useState("");
@@ -114,14 +141,25 @@ export default function TableBuilder({
           const isSerial = /SERIAL|AUTO_INCREMENT|AUTOINCREMENT/i.test(c.type);
           if (c.pk && !isSerial) def += " PRIMARY KEY";
           if (c.notNull && !c.pk) def += " NOT NULL";
+          def += fkClause(c);
           return def;
         });
       parts.push(`CREATE TABLE "${name}" (\n${defs.join(",\n")}\n);`);
     } else {
+      // Rename / retype existing columns (type change is Postgres-only).
+      for (const c of existingCols) {
+        const cur = c.name.trim() || c.origName;
+        if (c.name.trim() && c.name.trim() !== c.origName) {
+          parts.push(`ALTER TABLE "${name}" RENAME COLUMN "${c.origName}" TO "${c.name.trim()}";`);
+        }
+        if (c.newType && dialect === "postgres") {
+          parts.push(`ALTER TABLE "${name}" ALTER COLUMN "${cur}" TYPE ${c.newType} USING "${cur}"::${c.newType};`);
+        }
+      }
       // ALTER TABLE ADD COLUMN for each new column
       for (const c of cols.filter((c) => c.name.trim())) {
         parts.push(
-          `ALTER TABLE "${name}" ADD COLUMN "${c.name.trim()}" ${c.type}${c.notNull ? " NOT NULL" : ""};`
+          `ALTER TABLE "${name}" ADD COLUMN "${c.name.trim()}" ${c.type}${c.notNull ? " NOT NULL" : ""}${fkClause(c)};`
         );
       }
     }
@@ -149,7 +187,7 @@ export default function TableBuilder({
     return parts.join("\n\n");
     // seedCols is derived from cols/existing, so listing those covers it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tableName, cols, rows, isEdit, seedCols.join(","), seedMode, parsedJson]);
+  }, [tableName, cols, existingCols, rows, isEdit, dialect, seedCols.join(","), seedMode, parsedJson]);
 
   const apply = async () => {
     setError(null);
@@ -198,33 +236,68 @@ export default function TableBuilder({
 
           {/* columns */}
           <div>
+            {/* Existing columns — editable (rename always; retype on Postgres) */}
+            {isEdit && existingCols.length > 0 && (
+              <div className="mb-4">
+                <label className="text-xs text-muted block mb-2">Existing columns</label>
+                <div className="space-y-2">
+                  {existingCols.map((c, i) => (
+                    <div key={c.origName} className="flex items-center gap-2">
+                      {existing?.columns.find((x) => x.name === c.origName)?.pk && (
+                        <span title="Primary key" className="shrink-0">
+                          <Key className="w-3.5 h-3.5 text-warn" />
+                        </span>
+                      )}
+                      <input
+                        className="input flex-1 !py-1 text-sm"
+                        value={c.name}
+                        onChange={(e) => updateExisting(i, { name: e.target.value })}
+                        title="Rename column"
+                      />
+                      {dialect === "postgres" ? (
+                        <select
+                          className="select w-44 !py-1 text-sm"
+                          value={c.newType}
+                          onChange={(e) => updateExisting(i, { newType: e.target.value })}
+                          title="Change type"
+                        >
+                          <option value="">{c.origType} (keep)</option>
+                          {TYPE_OPTIONS[dialect].map((t) => (
+                            <option key={t} value={t}>
+                              → {t}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <span className="text-xs text-muted lowercase w-44 truncate" title="Type changes need PostgreSQL">
+                          {c.origType}
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                {dialect !== "postgres" && (
+                  <p className="text-[11px] text-muted mt-1.5">
+                    Renaming works on all engines. Changing an existing column&apos;s <b>type</b> isn&apos;t supported on{" "}
+                    {dialect === "mysql" ? "MySQL (beta)" : "SQLite"} — switch to PostgreSQL, or recreate the table.
+                  </p>
+                )}
+              </div>
+            )}
+
             <div className="flex items-center justify-between mb-2">
-              <label className="text-xs text-muted">
-                {isEdit ? "Add new columns (existing columns are kept)" : "Columns"}
-              </label>
+              <label className="text-xs text-muted">{isEdit ? "Add new columns" : "Columns"}</label>
               <button className="btn !py-1 !px-2 text-xs" onClick={addCol}>
                 <Plus className="w-3.5 h-3.5" /> Add column
               </button>
             </div>
 
-            {isEdit && existing && (
-              <div className="mb-2 flex flex-wrap gap-1.5">
-                {existing.columns.map((c) => (
-                  <span
-                    key={c.name}
-                    className="text-xs px-2 py-1 rounded border flex items-center gap-1"
-                    style={{ borderColor: "var(--border)", background: "var(--panel2)" }}
-                  >
-                    {c.pk && <Key className="w-3 h-3 text-warn" />}
-                    {c.name} <span className="text-muted lowercase">{c.type}</span>
-                  </span>
-                ))}
-              </div>
-            )}
-
             <div className="space-y-2">
-              {cols.map((c, i) => (
-                <div key={i} className="flex items-center gap-2">
+              {cols.map((c, i) => {
+                const refMeta = c.refTable ? schema.find((t) => t.name === c.refTable) : undefined;
+                return (
+                <div key={i} className="space-y-1">
+                <div className="flex items-center gap-2">
                   <input
                     className="input flex-1"
                     value={c.name}
@@ -256,7 +329,75 @@ export default function TableBuilder({
                     <Trash2 className="w-4 h-4" />
                   </button>
                 </div>
-              ))}
+                {/* Foreign key (references an existing table) */}
+                {schema.length > 0 &&
+                  (c.refTable ? (
+                    <div className="flex items-center gap-1.5 flex-wrap text-xs pl-1 text-muted">
+                      <Link2 className="w-3 h-3" /> references
+                      <select
+                        className="select !py-0.5 text-xs"
+                        value={c.refTable}
+                        onChange={(e) => {
+                          const t = schema.find((x) => x.name === e.target.value);
+                          updateCol(i, {
+                            refTable: e.target.value,
+                            refColumn: t ? t.columns.find((cc) => cc.pk)?.name ?? t.columns[0]?.name : undefined,
+                          });
+                        }}
+                      >
+                        {schema.map((t) => (
+                          <option key={t.name} value={t.name}>
+                            {t.name}
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        className="select !py-0.5 text-xs"
+                        value={c.refColumn ?? ""}
+                        onChange={(e) => updateCol(i, { refColumn: e.target.value })}
+                      >
+                        {(refMeta?.columns ?? []).map((cc) => (
+                          <option key={cc.name} value={cc.name}>
+                            {cc.name}
+                          </option>
+                        ))}
+                      </select>
+                      on delete
+                      <select
+                        className="select !py-0.5 text-xs"
+                        value={c.onDelete ?? ""}
+                        onChange={(e) => updateCol(i, { onDelete: e.target.value as OnDelete })}
+                      >
+                        <option value="">No action</option>
+                        <option value="cascade">Cascade</option>
+                        <option value="setnull">Set null</option>
+                      </select>
+                      <button
+                        className="hover:text-bad"
+                        onClick={() => updateCol(i, { refTable: undefined, refColumn: undefined, onDelete: undefined })}
+                        title="Remove foreign key"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      className="text-xs text-accent hover:underline pl-1 flex items-center gap-1"
+                      onClick={() => {
+                        const t = schema[0];
+                        updateCol(i, {
+                          refTable: t.name,
+                          refColumn: t.columns.find((cc) => cc.pk)?.name ?? t.columns[0]?.name,
+                          onDelete: "cascade",
+                        });
+                      }}
+                    >
+                      <Link2 className="w-3 h-3" /> add foreign key
+                    </button>
+                  ))}
+                </div>
+                );
+              })}
               {cols.length === 0 && (
                 <div className="text-sm text-muted italic">No new columns. Add one, or just seed data below.</div>
               )}

@@ -1,25 +1,40 @@
 "use client";
 
 import { usePlayground } from "@/lib/store";
-import { Table2, Key, Plus, Pencil, ChevronRight, RefreshCw, Eraser, Trash2, X, ArrowUpDown } from "lucide-react";
-import { useMemo, useState } from "react";
+import { Table2, Key, Plus, Pencil, ChevronRight, RefreshCw, Eraser, Trash2, X, ArrowUpDown, Upload, Download } from "lucide-react";
+import { useMemo, useRef, useState } from "react";
+import { downloadFile } from "@/lib/csv";
+import { dumpDatabase } from "@/lib/sqldump";
 
 export default function SchemaSidebar({
   onNewTable,
   onEditTable,
+  onImportFile,
 }: {
   onNewTable: () => void;
   onEditTable: (table: string) => void;
+  onImportFile: (files: File[]) => void;
 }) {
   const schema = usePlayground((s) => s.schema);
+  const engine = usePlayground((s) => s.engine);
   const dialect = usePlayground((s) => s.dialect);
   const refreshSchema = usePlayground((s) => s.refreshSchema);
   const newTab = usePlayground((s) => s.newTab);
+  const tabs = usePlayground((s) => s.tabs);
+  const setActiveTab = usePlayground((s) => s.setActiveTab);
+  const run = usePlayground((s) => s.run);
   const applySetup = usePlayground((s) => s.applySetup);
   const tableOrder = usePlayground((s) => s.tableOrder);
   const tableSort = usePlayground((s) => s.tableSort);
   const setTableSort = usePlayground((s) => s.setTableSort);
   const [open, setOpen] = useState<Record<string, boolean>>({});
+  const fileInput = useRef<HTMLInputElement>(null);
+
+  const exportSql = async () => {
+    if (!engine) return;
+    const dump = await dumpDatabase(engine, dialect);
+    downloadFile(`sql-playground-${dialect}.sql`, dump, "application/sql");
+  };
 
   // Apply the chosen sort to the table list.
   const sortedSchema = useMemo(() => {
@@ -44,9 +59,18 @@ export default function SchemaSidebar({
 
   const toggle = (t: string) => setOpen((o) => ({ ...o, [t]: !o[t] }));
 
-  // Open the SELECT in a NEW tab so the user's current query isn't lost.
+  // "View data" — always runs a fresh, read-only SELECT *. It never runs the
+  // tab's current SQL (which could be an unexecuted DELETE/UPDATE). Reuses the
+  // table's existing tab if one is open; otherwise opens a new one.
   const peek = (table: string) => {
-    newTab({ sql: `SELECT * FROM "${table}" LIMIT 100;`, title: table, run: true });
+    const sql = `SELECT * FROM "${table}";`; // all rows — the grid virtualizes large results
+    const existing = tabs.find((t) => t.title === table);
+    if (existing) {
+      setActiveTab(existing.id);
+      void run(sql); // run the SELECT explicitly — not the tab's editor contents
+    } else {
+      newTab({ sql, title: table, run: true });
+    }
   };
 
   // Clear rows / drop go through applySetup so the change persists across
@@ -85,7 +109,7 @@ export default function SchemaSidebar({
         <span className="truncate">SCHEMA · {schema.length} table{schema.length === 1 ? "" : "s"}</span>
         <div className="flex-1" />
         {schema.length > 1 && (
-          <label className="flex items-center gap-1" title="Sort tables">
+          <label className="flex items-center gap-1" title="Sort tables" data-tour="sort">
             <ArrowUpDown className="w-3.5 h-3.5" />
             <select
               className="bg-transparent text-xs cursor-pointer outline-none"
@@ -152,8 +176,12 @@ export default function SchemaSidebar({
                   </div>
                 ))}
                 <div className="mt-1.5 flex flex-wrap items-center gap-3">
-                  <button className="text-xs text-accent hover:underline" onClick={() => peek(t.name)}>
-                    SELECT * →
+                  <button
+                    className="text-xs text-accent hover:underline"
+                    onClick={() => peek(t.name)}
+                    title={`Run SELECT * FROM ${t.name}`}
+                  >
+                    View data →
                   </button>
                   <button
                     className="text-xs text-muted hover:text-warn flex items-center gap-1"
@@ -188,10 +216,39 @@ export default function SchemaSidebar({
         </div>
       )}
 
-      <div className="p-2 border-t shrink-0" style={{ borderColor: "var(--border)" }}>
+      <div className="p-2 border-t shrink-0 space-y-1.5" style={{ borderColor: "var(--border)" }}>
         <button className="btn w-full justify-center" onClick={onNewTable}>
           <Plus className="w-4 h-4" /> New Table
         </button>
+        <div className="flex gap-1.5" data-tour="import-export">
+          <button
+            className="btn flex-1 justify-center !px-2 text-xs"
+            onClick={() => fileInput.current?.click()}
+            title="Import CSV file(s) as tables (or drag files anywhere)"
+          >
+            <Upload className="w-3.5 h-3.5" /> Import
+          </button>
+          <button
+            className="btn flex-1 justify-center !px-2 text-xs"
+            onClick={() => void exportSql()}
+            disabled={schema.length === 0}
+            title="Download the whole database as a .sql file"
+          >
+            <Download className="w-3.5 h-3.5" /> Export .sql
+          </button>
+        </div>
+        <input
+          ref={fileInput}
+          type="file"
+          accept=".csv,.sql,text/csv"
+          multiple
+          className="hidden"
+          onChange={(e) => {
+            const files = Array.from(e.target.files ?? []);
+            if (files.length) onImportFile(files);
+            e.target.value = ""; // allow re-selecting the same file(s)
+          }}
+        />
       </div>
 
       {/* In-app confirmation dialog (replaces window.confirm) */}

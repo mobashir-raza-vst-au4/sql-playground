@@ -219,7 +219,7 @@ export default function SqlEditor() {
         style={{ borderColor: "var(--border)" }}
       >
         {/* Editor tabs (VS Code style) */}
-        <div className="flex items-stretch overflow-x-auto flex-1 min-w-0">
+        <div className="flex items-stretch overflow-x-auto flex-1 min-w-0" data-tour="tabs">
           {tabs.map((t) => {
             const active = t.id === activeTabId;
             return (

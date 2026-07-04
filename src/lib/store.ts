@@ -407,11 +407,13 @@ export const usePlayground = create<PlaygroundState>((set, get) => ({
     const outcome = await engine.exec(sql);
     // Surface the result in the panel so table-builder / sidebar actions give feedback.
     set({ outcome });
+    // Always refresh the schema — even on failure a statement may have partly
+    // applied (e.g. CREATE succeeded, INSERT failed), and the sidebar must show it.
+    await get().refreshSchema();
     if (outcome.ok) {
       const setupSql = [get().setupSql, sql].filter((s) => s.trim()).join("\n\n");
       // The workspace is now customized — no longer a pristine sample.
       set({ setupSql, activeSampleId: null });
-      await get().refreshSchema();
       persist(get());
       await saveSnapshot(get().dialect, engine);
     }

@@ -27,8 +27,8 @@ CREATE TABLE products (
 
 CREATE TABLE orders (
   id          SERIAL PRIMARY KEY,
-  customer_id INTEGER REFERENCES customers(id),
-  product_id  INTEGER REFERENCES products(id),
+  customer_id INTEGER REFERENCES customers(id) ON DELETE CASCADE,
+  product_id  INTEGER REFERENCES products(id) ON DELETE CASCADE,
   qty         INTEGER NOT NULL,
   ordered_at  DATE
 );
@@ -53,10 +53,11 @@ INSERT INTO orders (customer_id, product_id, qty, ordered_at) VALUES
   (3, 1, 1, '2024-03-09');
 `.trim();
 
+// SQLite/MySQL flavor: same schema (keeps the FKs + ON DELETE CASCADE, which
+// SQLite enforces once PRAGMA foreign_keys is on — set by the engine).
 const ECOMMERCE_SQLITE = ECOMMERCE_PG
   .replace(/SERIAL PRIMARY KEY/g, "INTEGER PRIMARY KEY AUTOINCREMENT")
-  .replace(/NUMERIC\(10,2\)/g, "REAL")
-  .replace(/ REFERENCES \w+\(id\)/g, "");
+  .replace(/NUMERIC\(10,2\)/g, "REAL");
 
 export const SAMPLES: Sample[] = [
   {

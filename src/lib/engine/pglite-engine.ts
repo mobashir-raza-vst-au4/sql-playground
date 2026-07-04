@@ -36,7 +36,9 @@ export class PgliteEngine implements DbEngine {
         results.push({
           columns,
           rows,
-          rowCount: res.affectedRows ?? rows.length,
+          // Row-returning queries (SELECT/RETURNING) report affectedRows=0, so
+          // count the actual rows; writes use affectedRows.
+          rowCount: columns.length > 0 ? rows.length : res.affectedRows ?? 0,
           affectedRows: res.affectedRows,
         });
       }
