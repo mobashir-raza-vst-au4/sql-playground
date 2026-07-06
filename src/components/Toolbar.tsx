@@ -15,6 +15,7 @@ import {
   Code2,
   Menu,
   HelpCircle,
+  X,
 } from "lucide-react";
 import { useState } from "react";
 import Logo from "./Logo";
@@ -47,6 +48,8 @@ export default function Toolbar({
   } = usePlayground();
   const [samplesOpen, setSamplesOpen] = useState(false);
   const [examplesOpen, setExamplesOpen] = useState(false);
+  const [resetOpen, setResetOpen] = useState(false);
+  const [resetting, setResetting] = useState(false);
 
   const active = DIALECTS.find((d) => d.id === dialect);
 
@@ -172,10 +175,7 @@ export default function Toolbar({
 
       <button
         className="btn btn-danger"
-        onClick={() => {
-          if (confirm("Reset this project? This discards your changes and restores the default sample tables."))
-            void resetDatabase();
-        }}
+        onClick={() => setResetOpen(true)}
         disabled={!ready}
         title="Discard changes and restore the default sample tables"
       >
@@ -209,6 +209,48 @@ export default function Toolbar({
       >
         <Play className="w-4 h-4" /> {running ? "Running…" : "Run all"}
       </button>
+
+      {/* In-app reset confirmation (window.confirm is unreliable in embedded views). */}
+      {resetOpen && (
+        <div
+          className="fixed inset-0 z-[80] flex items-center justify-center p-4"
+          style={{ background: "rgba(0,0,0,0.55)" }}
+          onMouseDown={(e) => e.target === e.currentTarget && !resetting && setResetOpen(false)}
+        >
+          <div
+            className="w-full max-w-sm rounded-lg border bg-panel p-4 shadow-2xl"
+            style={{ borderColor: "var(--border)" }}
+          >
+            <div className="flex items-start justify-between gap-2">
+              <div className="font-semibold">Reset this project?</div>
+              <button className="text-muted hover:text-app" onClick={() => !resetting && setResetOpen(false)}>
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <p className="text-sm text-muted mt-1.5 mb-4 leading-relaxed">
+              This <b>drops every table</b> (including ones you added), clears your query tabs, and
+              restores the default sample tables and query. This can&apos;t be undone.
+            </p>
+            <div className="flex justify-end gap-2">
+              <button className="btn" onClick={() => setResetOpen(false)} disabled={resetting}>
+                Cancel
+              </button>
+              <button
+                className="btn btn-danger"
+                disabled={resetting}
+                onClick={async () => {
+                  setResetting(true);
+                  await resetDatabase();
+                  setResetting(false);
+                  setResetOpen(false);
+                }}
+              >
+                {resetting ? "Resetting…" : "Reset to default"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </header>
   );
 }
