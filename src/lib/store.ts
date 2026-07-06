@@ -634,10 +634,22 @@ export const usePlayground = create<PlaygroundState>((set, get) => {
   },
 
   resetDatabase: async () => {
-    const { engine, dialect } = get();
+    const { engine, dialect, projects, activeProjectId } = get();
     if (!engine) return;
-    // Factory reset: drop everything the user built, then restore the default
-    // starter sample (schema + data) so the playground is never left empty.
+
+    // The default project is the oldest one (created first / by migration); it
+    // is always list[0] since new projects are appended.
+    const isDefaultProject = projects.length === 0 || projects[0].id === activeProjectId;
+
+    // In a project the user created → Reset removes it and returns to the
+    // default project (which keeps its own default tables). deleteProject
+    // switches to list[0] (the default) after removing the active one.
+    if (!isDefaultProject) {
+      await get().deleteProject(activeProjectId);
+      return;
+    }
+
+    // On the default project → restore its default sample tables + query.
     await engine.reset();
     const sample = SAMPLES[0];
     const seed = sampleSql(sample, dialect);

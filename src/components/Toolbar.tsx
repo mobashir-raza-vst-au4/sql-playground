@@ -45,7 +45,12 @@ export default function Toolbar({
     resetDatabase,
     loadSample,
     newTab,
+    projects,
+    activeProjectId,
   } = usePlayground();
+  // The default project is the oldest (list[0]); Reset behaves differently on it.
+  const onDefaultProject = projects.length === 0 || projects[0]?.id === activeProjectId;
+  const activeProjectName = projects.find((p) => p.id === activeProjectId)?.name ?? "this project";
   const [samplesOpen, setSamplesOpen] = useState(false);
   const [examplesOpen, setExamplesOpen] = useState(false);
   const [resetOpen, setResetOpen] = useState(false);
@@ -222,14 +227,23 @@ export default function Toolbar({
             style={{ borderColor: "var(--border)" }}
           >
             <div className="flex items-start justify-between gap-2">
-              <div className="font-semibold">Reset this project?</div>
+              <div className="font-semibold">{onDefaultProject ? "Reset to default?" : "Delete this project?"}</div>
               <button className="text-muted hover:text-app" onClick={() => !resetting && setResetOpen(false)}>
                 <X className="w-4 h-4" />
               </button>
             </div>
             <p className="text-sm text-muted mt-1.5 mb-4 leading-relaxed">
-              This <b>drops every table</b> (including ones you added), clears your query tabs, and
-              restores the default sample tables and query. This can&apos;t be undone.
+              {onDefaultProject ? (
+                <>
+                  This <b>drops every table</b> (including ones you added), clears your query tabs,
+                  and restores the default sample tables and query. This can&apos;t be undone.
+                </>
+              ) : (
+                <>
+                  This <b>deletes the project “{activeProjectName}”</b> and all its tables &amp; data,
+                  then switches you back to your default project. This can&apos;t be undone.
+                </>
+              )}
             </p>
             <div className="flex justify-end gap-2">
               <button className="btn" onClick={() => setResetOpen(false)} disabled={resetting}>
@@ -245,7 +259,7 @@ export default function Toolbar({
                   setResetOpen(false);
                 }}
               >
-                {resetting ? "Resetting…" : "Reset to default"}
+                {resetting ? "Working…" : onDefaultProject ? "Reset to default" : "Delete project"}
               </button>
             </div>
           </div>
