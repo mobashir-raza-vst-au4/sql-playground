@@ -184,12 +184,18 @@ function loadPersisted(projectId: string): PersistedWorkspace | null {
   }
 }
 
+// setupSql accumulates every applied statement (including bulk CSV inserts) and
+// can grow to megabytes, filling localStorage. It's only used to re-seed a
+// dialect that has no snapshot yet, so cap it — the IndexedDB snapshot is the
+// authoritative copy of the current database.
+const MAX_SETUP_SQL = 50_000;
+
 function persist(state: PlaygroundState) {
   if (typeof window === "undefined" || !state.activeProjectId) return;
   const data: PersistedWorkspace = {
     dialect: state.dialect,
     editorSql: state.editorSql,
-    setupSql: state.setupSql,
+    setupSql: state.setupSql.length > MAX_SETUP_SQL ? "" : state.setupSql,
     activeSampleId: state.activeSampleId,
     tabs: state.tabs,
     activeTabId: state.activeTabId,
@@ -384,15 +390,15 @@ export const usePlayground = create<PlaygroundState>((set, get) => {
     const { engine, dialect, activeProjectId } = get();
     if (engine) await saveSnapshot(activeProjectId, dialect, engine);
 
+    // In-memory state is the source of truth; the localStorage file is only a
+    // best-effort mirror (it can fail to write when the browser is over quota).
     const id = newProjectId();
-    const pf = loadProjectsFile() ?? { activeId: id, list: [] };
-    pf.list = [...pf.list, { id, name: name.trim() || "Untitled", createdAt: Date.now() }];
-    pf.activeId = id;
-    saveProjectsFile(pf);
+    const list = [...get().projects, { id, name: name.trim() || "Untitled", createdAt: Date.now() }];
+    saveProjectsFile({ activeId: id, list });
 
     // Fresh, empty workspace (no snapshot, no setup → blank DB + one empty tab).
     set({
-      projects: pf.list,
+      projects: list,
       activeProjectId: id,
       ready: false,
       statusMessage: "Creating project…",
@@ -406,29 +412,27 @@ export const usePlayground = create<PlaygroundState>((set, get) => {
   },
 
   renameProject: (id, name) => {
-    const pf = loadProjectsFile();
-    if (!pf) return;
-    pf.list = pf.list.map((p) => (p.id === id ? { ...p, name: name.trim() || p.name } : p));
-    saveProjectsFile(pf);
-    set({ projects: pf.list });
+    const list = get().projects.map((p) => (p.id === id ? { ...p, name: name.trim() || p.name } : p));
+    saveProjectsFile({ activeId: get().activeProjectId, list });
+    set({ projects: list });
   },
 
   deleteProject: async (id) => {
-    const pf = loadProjectsFile();
-    if (!pf || pf.list.length <= 1) return; // always keep at least one project
-    // Purge the deleted project's storage.
+    const current = get().projects;
+    if (current.length <= 1) return; // always keep at least one project
+    // Purge the deleted project's storage (best-effort).
     if (typeof window !== "undefined") localStorage.removeItem(wsKey(id));
     await Promise.all(DIALECTS.map((d) => idbDel(dbKey(id, d.id))));
 
-    const wasActive = pf.activeId === id;
-    pf.list = pf.list.filter((p) => p.id !== id);
-    if (wasActive) pf.activeId = pf.list[0].id;
-    saveProjectsFile(pf);
-    set({ projects: pf.list, activeProjectId: pf.activeId });
+    const wasActive = get().activeProjectId === id;
+    const list = current.filter((p) => p.id !== id);
+    const activeId = wasActive ? list[0].id : get().activeProjectId;
+    saveProjectsFile({ activeId, list });
+    set({ projects: list, activeProjectId: activeId });
 
     if (wasActive) {
       set({ ready: false, statusMessage: "Loading project…", outcome: null, lastRunSql: "" });
-      await bootProject(pf.activeId, false);
+      await bootProject(activeId, false);
     }
   },
 
@@ -439,11 +443,7 @@ export const usePlayground = create<PlaygroundState>((set, get) => {
     const { engine, dialect, activeProjectId } = get();
     if (engine) await saveSnapshot(activeProjectId, dialect, engine);
 
-    const pf = loadProjectsFile();
-    if (pf) {
-      pf.activeId = id;
-      saveProjectsFile(pf);
-    }
+    saveProjectsFile({ activeId: id, list: get().projects });
     set({
       activeProjectId: id,
       ready: false,
