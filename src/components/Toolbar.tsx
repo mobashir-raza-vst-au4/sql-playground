@@ -173,10 +173,11 @@ export default function Toolbar({
       <button
         className="btn btn-danger"
         onClick={() => {
-          if (confirm("Reset the database? This drops all tables and data.")) void resetDatabase();
+          if (confirm("Reset this project? This discards your changes and restores the default sample tables."))
+            void resetDatabase();
         }}
         disabled={!ready}
-        title="Drop all tables and start fresh"
+        title="Discard changes and restore the default sample tables"
       >
         <RotateCcw className="w-4 h-4" /> Reset
       </button>

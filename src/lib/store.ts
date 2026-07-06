@@ -634,27 +634,37 @@ export const usePlayground = create<PlaygroundState>((set, get) => {
   },
 
   resetDatabase: async () => {
-    const { engine } = get();
+    const { engine, dialect } = get();
     if (!engine) return;
+    // Factory reset: drop everything the user built, then restore the default
+    // starter sample (schema + data) so the playground is never left empty.
     await engine.reset();
-    // Full wipe: drop tables, clear all editor tabs, and purge persisted storage.
+    const sample = SAMPLES[0];
+    const seed = sampleSql(sample, dialect);
+    await engine.exec(seed);
+
     const id = newTabId();
     set({
-      setupSql: "",
-      editorSql: "",
-      tabs: [{ id, title: "Query 1", sql: "" }],
+      setupSql: seed,
+      editorSql: sample.query,
+      tabs: [{ id, title: sample.name, sql: sample.query }],
       activeTabId: id,
       tabSeq: 1,
       outcome: null,
       lastRunSql: "",
-      activeSampleId: null,
+      activeSampleId: sample.id,
+      tableOrder: {},
     });
+
     const pid = get().activeProjectId;
-    if (typeof window !== "undefined") localStorage.removeItem(wsKey(pid));
-    // Delete this project's saved DB snapshots for every dialect.
-    await Promise.all(DIALECTS.map((d) => idbDel(dbKey(pid, d.id))));
+    // Drop the OTHER dialects' snapshots so they re-seed the default sample too
+    // (the active dialect is re-saved below).
+    await Promise.all(
+      DIALECTS.filter((d) => d.id !== dialect).map((d) => idbDel(dbKey(pid, d.id)))
+    );
     await get().refreshSchema();
     persist(get());
+    await saveSnapshot(pid, dialect, engine);
   },
 
   loadSample: async (id) => {
